@@ -1,0 +1,10 @@
+main.c:68:5:bufsize	24	static
+main.c:75:6:clear_buffer	16	static
+main.c:80:6:send_uart	24	static
+main.c:86:6:write_to_csvfile	32	static
+main.c:112:5:main	8	static
+main.c:335:6:SystemClock_Config	128	static
+main.c:381:13:MX_SPI2_Init	8	static
+main.c:421:13:MX_USART2_UART_Init	8	static
+main.c:456:13:MX_GPIO_Init	40	static
+main.c:485:6:Error_Handler	4	static,ignoring_inline_asm
