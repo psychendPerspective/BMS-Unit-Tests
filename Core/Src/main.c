@@ -2,7 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
+  * @brief          : Main program body for BMSv1.0 Hardware Unit Tests
   ******************************************************************************
   * @attention
   *
@@ -22,11 +22,26 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
-//#include "retarget.h"
 
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CAN_HandleTypeDef hcan;
+
 SPI_HandleTypeDef hspi2;
 
 UART_HandleTypeDef huart2;
@@ -40,7 +55,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_SPI2_Init(void);
+static void MX_CAN_Init(void);
 /* USER CODE BEGIN PFP */
+
+/*File system declerations */
 FATFS fs;  // file system
 FIL fil; // File
 FILINFO fno;
@@ -55,7 +73,7 @@ UINT br, bw;  // File read/write count
 uint8_t dummy_timer, dummy_cell_votlages, dummy_pack_voltage, dummy_pack_current, dummy_temperature;
 uint8_t char_data[] = "Xanadu BMS v1.0 Unit Test in progress \r\n";
 
-/**** capacity related *****/
+/**** SD card capacity related *****/
 FATFS *pfs;
 DWORD fre_clust;
 uint32_t total, free_space;
@@ -63,8 +81,19 @@ uint32_t total, free_space;
 #define BUFFER_SIZE 1024
 char buffer[BUFFER_SIZE];  // to store strings..
 
-int i=0;
+int i=0; //for general buffer functions
 
+
+/*CAN1 parameters*/
+CAN_TxHeaderTypeDef TxHeader;
+CAN_RxHeaderTypeDef RxHeader;
+uint8_t TxData[8];
+uint8_t RxData[8];
+uint32_t TxMailbox;
+int CAN_data_checkFlag = 0;
+
+
+/*******************************************************************************/
 int bufsize (char *buf)
 {
 	int i=0;
@@ -97,18 +126,29 @@ void write_to_csvfile (void)
 		  fresult = f_lseek(&fil, f_size(&fil));
 		  sprintf(buffer, "%d,%d,%d,%d,%d\r\n", dummy_timer, dummy_cell_votlages, dummy_pack_voltage, dummy_pack_current, dummy_temperature);
 		  fresult = f_write(&fil, buffer, bufsize(buffer), &bw);
-		  send_uart(buffer);
+		  //send_uart(buffer);
 		  f_close (&fil);
 
 		  clear_buffer();
 }
 
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData);
+	if(RxHeader.DLC == 2 )
+	{
+		CAN_data_checkFlag = 1;
+	}
+}
+
+/*******************************************************************************/
 /* USER CODE END 0 */
 
 /**
   * @brief  The application entry point.
   * @retval int
   */
+
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -136,6 +176,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_SPI2_Init();
   MX_FATFS_Init();
+  MX_CAN_Init();
   /* USER CODE BEGIN 2 */
   //char buf[100];
   HAL_Delay(500);
@@ -144,6 +185,21 @@ int main(void)
   send_uart(buffer);
   clear_buffer();
 
+  /*CAN Initializations*/
+  HAL_CAN_Start(&hcan);
+  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING); //using FIFO0 for RX callback reception
+  TxHeader.DLC = 2; //data
+  TxHeader.IDE = CAN_ID_STD;
+  TxHeader.RTR = CAN_RTR_DATA;
+  TxHeader.StdId = 0x446;  //id
+
+  //populate data to Txdata bytes
+  TxData[0] = 11;
+  TxData[1] = 100;
+  //send CAN message // TO DO:check CAN message reception on BluePill
+  HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+
+  //mount SD card and check SD card mounting status
   fresult = f_mount(&fs, "/", 1);
   	if (fresult != FR_OK)
   	{
@@ -194,15 +250,9 @@ int main(void)
   	send_uart("File1.txt is opened and it contains the data as shown below\r\n");
   	send_uart(buffer);
   	send_uart("\r\n");
-
   	/* Close file */
   	f_close(&fil);
-
   	clear_buffer();
-
-
-
-
   	/**************** The following operation is using f_write and f_read **************************/
 
   	/* Create second file with read write access and open it */
@@ -219,12 +269,8 @@ int main(void)
 
   	/* Close file */
   	f_close(&fil);
-
-
-
   	// clearing buffer to show that result obtained is from the file
   	clear_buffer();
-
   	/* Open second file to read */
   	fresult = f_open(&fil, "file2.txt", FA_READ);
   	if (fresult == FR_OK){
@@ -258,9 +304,7 @@ int main(void)
 
   	/* write the string to the file */
   	fresult = f_puts("This is updated data and it should be in the end", &fil);
-
   	f_close (&fil);
-
   	clear_buffer();
 
   	/* Open to read the file */
@@ -321,6 +365,14 @@ int main(void)
 	  //HAL_UART_Transmit(&huart2,char_data,sizeof(char_data),10);
 	  write_to_csvfile();
 	  HAL_Delay(250);
+
+	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback
+	  {
+		  sprintf(buffer, "CAN Message values received is:%d, %d\r\n", RxData[0], RxData[1]);
+		  send_uart(buffer);
+		  clear_buffer();
+		  CAN_data_checkFlag = 0;
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -371,6 +423,58 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief CAN Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN_Init(void)
+{
+
+  /* USER CODE BEGIN CAN_Init 0 */
+
+  /* USER CODE END CAN_Init 0 */
+
+  /* USER CODE BEGIN CAN_Init 1 */
+
+  /* USER CODE END CAN_Init 1 */
+  hcan.Instance = CAN;
+  hcan.Init.Prescaler = 18;
+  hcan.Init.Mode = CAN_MODE_NORMAL;
+  hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_2TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan.Init.TimeTriggeredMode = DISABLE;
+  hcan.Init.AutoBusOff = DISABLE;
+  hcan.Init.AutoWakeUp = DISABLE;
+  hcan.Init.AutoRetransmission = DISABLE;
+  hcan.Init.ReceiveFifoLocked = DISABLE;
+  hcan.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN_Init 2 */
+  //CAN filter settings
+  CAN_FilterTypeDef canfilterConfig;
+
+  canfilterConfig.FilterActivation = CAN_FILTER_ENABLE;
+  canfilterConfig.FilterBank = 11;
+  canfilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  canfilterConfig.FilterIdHigh = 0x103<<5;
+  canfilterConfig.FilterIdLow = 0;
+  canfilterConfig.FilterMaskIdHigh = 0x103<<5;
+  canfilterConfig.FilterMaskIdLow = 0x0000;
+  canfilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+  canfilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+  canfilterConfig.SlaveStartFilterBank = 0;
+
+  HAL_CAN_ConfigFilter(&hcan, &canfilterConfig);
+
+  /* USER CODE END CAN_Init 2 */
+
 }
 
 /**
