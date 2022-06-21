@@ -92,6 +92,7 @@ uint8_t RxData[8];
 uint32_t TxMailbox;
 int CAN_data_checkFlag = 0;
 
+uint8_t uart_rx_data[10];  //  uart receive buffer of 10 bytes
 
 /*******************************************************************************/
 int bufsize (char *buf)
@@ -141,6 +142,16 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	}
 }
 
+uint8_t Rx_data[10];  //  creating a buffer of 10 bytes
+int uart_rx_flag = 0;
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  HAL_UART_Receive_IT(&huart2, uart_rx_data, 4);
+  uart_rx_flag = 1;
+
+}
+
 /*******************************************************************************/
 /* USER CODE END 0 */
 
@@ -148,7 +159,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
   * @brief  The application entry point.
   * @retval int
   */
-
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -179,7 +189,7 @@ int main(void)
   MX_CAN_Init();
   /* USER CODE BEGIN 2 */
   //char buf[100];
-  HAL_Delay(500);
+  HAL_Delay(250);
 
   sprintf(buffer, "Xanadu BMS v1.0 Unit Test in Progress\r\n");
   send_uart(buffer);
@@ -197,7 +207,9 @@ int main(void)
   TxData[0] = 11;
   TxData[1] = 100;
   //send CAN message // TO DO:check CAN message reception on BluePill
-  HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+  //HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+
+  HAL_UART_Receive_IT (&huart2, uart_rx_data, 4); //set interrupt for uart rx
 
   //mount SD card and check SD card mounting status
   fresult = f_mount(&fs, "/", 1);
@@ -352,6 +364,13 @@ int main(void)
 //  		send_uart ("SD CARD UNMOUNTED successfully...\r\n");
 //  	}
 
+
+  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, SET); //turn ON precharge relay
+  	HAL_Delay(1000);
+  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, RESET); //turn OFF precharge relay
+  	HAL_Delay(250);
+  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, SET); //turn ON HV+ contactor
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -360,11 +379,12 @@ int main(void)
   {
 	  //HAL_UART_Receive (&huart2, Rx_data, 4, 1000);
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3); //toggle status LED
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, SET); //turn ON precharge relay
 	  //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_11); //toggle precharge relay
 	  //HAL_UART_Transmit(&huart2,char_data,sizeof(char_data),10);
 	  write_to_csvfile();
 	  HAL_Delay(250);
+	  //send CAN message // TO DO:check CAN message reception on BluePill
+	  HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 
 	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback
 	  {
@@ -372,6 +392,16 @@ int main(void)
 		  send_uart(buffer);
 		  clear_buffer();
 		  CAN_data_checkFlag = 0;
+		  //HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+	  }
+
+	  if(uart_rx_flag)
+	  {
+		  sprintf(buffer, "RX Message is: %c, %c, %c\r\n", uart_rx_data[0], uart_rx_data[1], uart_rx_data[2]);
+		  send_uart(buffer);
+		  clear_buffer();
+		  uart_rx_flag = 0;
+
 	  }
     /* USER CODE END WHILE */
 
@@ -567,10 +597,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_3, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PB11 PB12 PB3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_3;
+  /*Configure GPIO pins : PB10 PB11 PB12 PB3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
