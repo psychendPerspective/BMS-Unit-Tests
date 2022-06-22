@@ -204,6 +204,25 @@ void get_time(void)
  send_uart(buffer);
  clear_buffer();
 }
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)  //interrupt callback function for Charger detect
+{
+    if(GPIO_Pin == GPIO_PIN_5) // If The INT Source Is EXTI5 (PB5 Pin)
+    {
+    	if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5))
+    	{
+    		sprintf(buffer, "Charger detected\r\n");
+    		send_uart(buffer);
+    		clear_buffer();
+    	}
+    	else
+    	{
+    		sprintf(buffer, "Charger has been disconnected\r\n");
+    		send_uart(buffer);
+    		clear_buffer();
+    	}
+    }
+}
 /*******************************************************************************/
 /* USER CODE END 0 */
 
@@ -587,6 +606,9 @@ static void MX_RTC_Init(void)
 
   /* USER CODE END RTC_Init 0 */
 
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef sDate = {0};
+
   /* USER CODE BEGIN RTC_Init 1 */
 
   /* USER CODE END RTC_Init 1 */
@@ -608,7 +630,30 @@ static void MX_RTC_Init(void)
 
   /* USER CODE END Check_RTC_BKUP */
 
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 0x0;
+  sTime.Minutes = 0x23;
+  sTime.Seconds = 0x0;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sDate.WeekDay = RTC_WEEKDAY_WEDNESDAY;
+  sDate.Month = RTC_MONTH_JUNE;
+  sDate.Date = 0x22;
+  sDate.Year = 0x22;
 
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+	  HAL_RTCEx_BKUPWrite(&hrtc,RTC_BKP_DR1, 0x32F2);
+
+  /* USER CODE END RTC_Init 2 */
 
 }
 
@@ -711,6 +756,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 }
 
