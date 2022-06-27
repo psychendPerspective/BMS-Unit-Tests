@@ -83,10 +83,12 @@ FATFS *pfs;
 DWORD fre_clust;
 uint32_t total, free_space;
 
+//UART2 parameters
 #define BUFFER_SIZE 1024
 char buffer[BUFFER_SIZE];  // to store strings..
-
 int i=0; //for general buffer functions
+uint8_t uart_rx_data[10];  //  uart receive buffer of 10 bytes
+int uart_rx_flag = 0;
 
 
 /*CAN1 parameters*/
@@ -97,8 +99,6 @@ uint8_t RxData[8];
 uint32_t TxMailbox;
 int CAN_data_checkFlag = 0;
 
-uint8_t uart_rx_data[10];  //  uart receive buffer of 10 bytes
-int uart_rx_flag = 0;
 
 //LTC6811 parameters
 #define CS_PORT GPIOA
@@ -130,11 +130,11 @@ void send_uart (char *string)
 void write_to_csvfile (void)
 {
 
-		  dummy_timer =+ 1;
-		  dummy_cell_votlages =+ 0.3;
-		  dummy_pack_voltage =+ 11;
-		  dummy_pack_current =+ 0.5;
-		  dummy_temperature =+ 5;
+		  dummy_timer += 1;
+		  dummy_cell_votlages += 1;
+		  dummy_pack_voltage += 11;
+		  dummy_pack_current += 1;
+		  dummy_temperature += 5;
 
 		  fresult = f_open(&fil, "file3.csv", FA_OPEN_EXISTING | FA_READ | FA_WRITE);
 		  /* Move to offset to the end of the file */
@@ -240,7 +240,7 @@ void wakeup_idle(uint8_t total_ic) //Number of ICs in the system
 	{
 		SPI1_pTxData[0] = 0xFF;
 		HAL_GPIO_WritePin(CS_PORT, CS_PIN, RESET);
-		HAL_SPI_TransmitReceive(&hspi1, &SPI1_pTxData, &SPI1_pRxData, 8,SPI1_TIMEOUT);//Guarantees the isoSPI will be in ready mode
+		HAL_SPI_TransmitReceive(&hspi1,SPI1_pTxData, SPI1_pRxData, 8,SPI1_TIMEOUT);//Guarantees the isoSPI will be in ready mode
 		HAL_GPIO_WritePin(CS_PORT, CS_PIN, SET);
 	}
 }
@@ -255,6 +255,163 @@ void wakeup_sleep(uint8_t total_ic) //Number of ICs in the system
 		HAL_GPIO_WritePin(CS_PORT, CS_PIN, SET);
 		HAL_Delay(0.01);
 	}
+}
+
+void sd_init(void)
+{
+	  //mount SD card and check SD card mounting status
+	  fresult = f_mount(&fs, "/", 1);
+	  	if (fresult != FR_OK)
+	  	{
+	  		send_uart ("ERROR!!! in mounting SD CARD...\n\n");
+
+	  	}
+	  	else
+	  	{
+	  		send_uart("SD CARD mounted successfully...\r\n");
+	  	}
+
+	  	/*************** Card capacity details ********************/
+
+	  	/* Check free space */
+	  	f_getfree("", &fre_clust, &pfs);
+
+	  	total = (uint32_t)((pfs->n_fatent - 2) * pfs->csize * 0.5);
+	  	sprintf (buffer, "SD CARD Total Size: \t%lu\r\n",total);
+	  	send_uart(buffer);
+	  	clear_buffer();
+	  	free_space = (uint32_t)(fre_clust * pfs->csize * 0.5);
+	  	sprintf (buffer, "SD CARD Free Space: \t%lu\r\n",free_space);
+	  	send_uart(buffer);
+	  	clear_buffer();
+
+
+
+	  	/************* The following operation is using PUTS and GETS *********************/
+
+	  	/* Open file to write/ create a file if it doesn't exist */
+	    fresult = f_open(&fil, "file1.txt", FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
+	  	/* Writing text */
+	  	f_puts("This data is written to FILE1.txt and it was written using f_puts ", &fil);
+	  	/* Close file */
+	  	fresult = f_close(&fil);
+
+	  	if (fresult == FR_OK)
+	  	{
+	  		send_uart ("File1.txt created and the data is written \r\n");
+	  	}
+
+	  	/* Open file to read */
+	  	fresult = f_open(&fil, "file1.txt", FA_READ);
+
+	  	/* Read string from the file */
+	  	f_gets(buffer, f_size(&fil), &fil);
+
+	  	send_uart("File1.txt is opened and it contains the data as shown below\r\n");
+	  	send_uart(buffer);
+	  	send_uart("\r\n");
+	  	/* Close file */
+	  	f_close(&fil);
+	  	clear_buffer();
+	  	/**************** The following operation is using f_write and f_read **************************/
+
+	  	/* Create second file with read write access and open it */
+	  	fresult = f_open(&fil, "file2.txt", FA_CREATE_ALWAYS | FA_WRITE);
+
+	  	/* Writing text */
+	  	strcpy (buffer, "This is File2.txt, written using f_write and it says SD card unit test for BMS\r\n");
+
+	  	fresult = f_write(&fil, buffer, bufsize(buffer), &bw);
+	  	if (fresult == FR_OK)
+	  	{
+	  		send_uart ("File2.txt created and the data is written \r\n");
+	  	}
+
+	  	/* Close file */
+	  	f_close(&fil);
+	  	// clearing buffer to show that result obtained is from the file
+	  	clear_buffer();
+	  	/* Open second file to read */
+	  	fresult = f_open(&fil, "file2.txt", FA_READ);
+	  	if (fresult == FR_OK){
+	  		send_uart ("file2.txt is open and the data is shown below\r\n");
+	  	}
+
+	  	/* Read data from the file
+	  	 * Please see the function details for the arguments */
+	  	f_read (&fil, buffer, f_size(&fil), &br);
+	  	send_uart(buffer);
+	  	send_uart("\r\n");
+
+	  	/* Close file */
+	  	f_close(&fil);
+
+	  	clear_buffer();
+
+
+	  	/*********************UPDATING an existing file ***************************/
+
+	  	/* Open the file with write access */
+	  	fresult = f_open(&fil, "file2.txt", FA_OPEN_EXISTING | FA_READ | FA_WRITE);
+
+	  	/* Move to offset to the end of the file */
+	  	fresult = f_lseek(&fil, f_size(&fil));
+
+	  	if (fresult == FR_OK)
+	  	{
+	  		send_uart ("About to update the file2.txt\r\n");
+	  	}
+
+	  	/* write the string to the file */
+	  	fresult = f_puts("This is updated data and it should be in the end", &fil);
+	  	f_close (&fil);
+	  	clear_buffer();
+
+	  	/* Open to read the file */
+	  	fresult = f_open (&fil, "file2.txt", FA_READ);
+
+	  	/* Read string from the file */
+	  	fresult = f_read (&fil, buffer, f_size(&fil), &br);
+	  	if (fresult == FR_OK)
+	  	{
+	  		send_uart ("Below is the data from updated file2.txt\r\n");
+	  		send_uart(buffer);
+	  		send_uart("\r\n");
+	  	}
+
+	  	/* Close file */
+	  	f_close(&fil);
+
+	  	clear_buffer();
+
+
+	  	/*Create csv file to log random data*/
+	  	fresult = f_open(&fil, "file3.csv", FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
+	  	/* Writing text */
+	  	f_puts("Timer(s), Cell_Voltages, Pack_Voltage, Pack_Current, Temperature\r\n ", &fil);
+	  	/* Close file */
+	  	fresult = f_close(&fil);
+	  	if (fresult == FR_OK)
+	  	{
+	  		send_uart ("File3.csv created and header is written \r\n");
+	  	}
+
+
+	  	/*************************REMOVING FILES FROM THE DIRECTORY ****************************/
+
+	//  	fresult = f_unlink("/file1.txt");
+	//  	if (fresult == FR_OK) send_uart("file1.txt removed successfully...\n");
+	//
+	//  	fresult = f_unlink("/file2.txt");
+	//  	if (fresult == FR_OK) send_uart("file2.txt removed successfully...\n");
+
+	  	/* Unmount SDCARD */
+	//  	fresult = f_mount(NULL, "/", 1);
+	//  	if (fresult == FR_OK)
+	//  	{
+	//  		send_uart ("SD CARD UNMOUNTED successfully...\r\n");
+	//  	}
+
 }
 /*******************************************************************************/
 /* USER CODE END 0 */
@@ -295,7 +452,7 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
   //char buf[100];
-  HAL_Delay(250);
+  //HAL_Delay(250);
 
   sprintf(buffer, "Xanadu BMS v1.0 Unit Test in Progress\r\n");
   send_uart(buffer);
@@ -306,6 +463,8 @@ int main(void)
 	  	  set_time(); //set RTC init value
   	  }
 
+  sd_init();
+
   /*CAN Initializations*/
   HAL_CAN_Start(&hcan);
   HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING); //using FIFO0 for RX callback reception
@@ -313,179 +472,25 @@ int main(void)
   TxHeader.IDE = CAN_ID_STD;
   TxHeader.RTR = CAN_RTR_DATA;
   TxHeader.StdId = 0x446;  //id
-
   //populate data to Txdata bytes
   TxData[0] = 11;
   TxData[1] = 100;
   //send CAN message // TO DO:check CAN message reception on BluePill
   //HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 
+  /*UART2 Interrupt*/
   HAL_UART_Receive_IT (&huart2, uart_rx_data, 4); //set interrupt for uart rx
 
-  //mount SD card and check SD card mounting status
-  fresult = f_mount(&fs, "/", 1);
-  	if (fresult != FR_OK)
-  	{
-  		send_uart ("ERROR!!! in mounting SD CARD...\n\n");
-
-  	}
-  	else
-  	{
-  		send_uart("SD CARD mounted successfully...\r\n");
-  	}
-
-  	/*************** Card capacity details ********************/
-
-  	/* Check free space */
-  	f_getfree("", &fre_clust, &pfs);
-
-  	total = (uint32_t)((pfs->n_fatent - 2) * pfs->csize * 0.5);
-  	sprintf (buffer, "SD CARD Total Size: \t%lu\r\n",total);
-  	send_uart(buffer);
-  	clear_buffer();
-  	free_space = (uint32_t)(fre_clust * pfs->csize * 0.5);
-  	sprintf (buffer, "SD CARD Free Space: \t%lu\r\n",free_space);
-  	send_uart(buffer);
-  	clear_buffer();
-
-
-
-  	/************* The following operation is using PUTS and GETS *********************/
-
-  	/* Open file to write/ create a file if it doesn't exist */
-    fresult = f_open(&fil, "file1.txt", FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
-  	/* Writing text */
-  	f_puts("This data is written to FILE1.txt and it was written using f_puts ", &fil);
-  	/* Close file */
-  	fresult = f_close(&fil);
-
-  	if (fresult == FR_OK)
-  	{
-  		send_uart ("File1.txt created and the data is written \r\n");
-  	}
-
-  	/* Open file to read */
-  	fresult = f_open(&fil, "file1.txt", FA_READ);
-
-  	/* Read string from the file */
-  	f_gets(buffer, f_size(&fil), &fil);
-
-  	send_uart("File1.txt is opened and it contains the data as shown below\r\n");
-  	send_uart(buffer);
-  	send_uart("\r\n");
-  	/* Close file */
-  	f_close(&fil);
-  	clear_buffer();
-  	/**************** The following operation is using f_write and f_read **************************/
-
-  	/* Create second file with read write access and open it */
-  	fresult = f_open(&fil, "file2.txt", FA_CREATE_ALWAYS | FA_WRITE);
-
-  	/* Writing text */
-  	strcpy (buffer, "This is File2.txt, written using f_write and it says SD card unit test for BMS\r\n");
-
-  	fresult = f_write(&fil, buffer, bufsize(buffer), &bw);
-  	if (fresult == FR_OK)
-  	{
-  		send_uart ("File2.txt created and the data is written \r\n");
-  	}
-
-  	/* Close file */
-  	f_close(&fil);
-  	// clearing buffer to show that result obtained is from the file
-  	clear_buffer();
-  	/* Open second file to read */
-  	fresult = f_open(&fil, "file2.txt", FA_READ);
-  	if (fresult == FR_OK){
-  		send_uart ("file2.txt is open and the data is shown below\r\n");
-  	}
-
-  	/* Read data from the file
-  	 * Please see the function details for the arguments */
-  	f_read (&fil, buffer, f_size(&fil), &br);
-  	send_uart(buffer);
-  	send_uart("\r\n");
-
-  	/* Close file */
-  	f_close(&fil);
-
-  	clear_buffer();
-
-
-  	/*********************UPDATING an existing file ***************************/
-
-  	/* Open the file with write access */
-  	fresult = f_open(&fil, "file2.txt", FA_OPEN_EXISTING | FA_READ | FA_WRITE);
-
-  	/* Move to offset to the end of the file */
-  	fresult = f_lseek(&fil, f_size(&fil));
-
-  	if (fresult == FR_OK)
-  	{
-  		send_uart ("About to update the file2.txt\r\n");
-  	}
-
-  	/* write the string to the file */
-  	fresult = f_puts("This is updated data and it should be in the end", &fil);
-  	f_close (&fil);
-  	clear_buffer();
-
-  	/* Open to read the file */
-  	fresult = f_open (&fil, "file2.txt", FA_READ);
-
-  	/* Read string from the file */
-  	fresult = f_read (&fil, buffer, f_size(&fil), &br);
-  	if (fresult == FR_OK)
-  	{
-  		send_uart ("Below is the data from updated file2.txt\r\n");
-  		send_uart(buffer);
-  		send_uart("\r\n");
-  	}
-
-  	/* Close file */
-  	f_close(&fil);
-
-  	clear_buffer();
-
-
-  	/*Create csv file to log random data*/
-  	fresult = f_open(&fil, "file3.csv", FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
-  	/* Writing text */
-  	f_puts("Timer(s), Cell_Voltages, Pack_Voltage, Pack_Current, Temperature\r\n ", &fil);
-  	/* Close file */
-  	fresult = f_close(&fil);
-  	if (fresult == FR_OK)
-  	{
-  		send_uart ("File3.csv created and header is written \r\n");
-  	}
-
-
-  	/*************************REMOVING FILES FROM THE DIRECTORY ****************************/
-
-//  	fresult = f_unlink("/file1.txt");
-//  	if (fresult == FR_OK) send_uart("file1.txt removed successfully...\n");
-//
-//  	fresult = f_unlink("/file2.txt");
-//  	if (fresult == FR_OK) send_uart("file2.txt removed successfully...\n");
-
-  	/* Unmount SDCARD */
-//  	fresult = f_mount(NULL, "/", 1);
-//  	if (fresult == FR_OK)
-//  	{
-//  		send_uart ("SD CARD UNMOUNTED successfully...\r\n");
-//  	}
-
-
-  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, SET); //turn ON precharge relay
-  	HAL_Delay(1000);
-  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, RESET); //turn OFF precharge relay
-  	HAL_Delay(250);
-  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, SET); //turn ON HV+ contactor
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, SET); //turn ON precharge relay
+  HAL_Delay(1000);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, RESET); //turn OFF precharge relay
+  HAL_Delay(250);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, SET); //turn ON HV+ contactor
 
   	//TO DO:add LTC6811 library files/use driverSWLTC6804 functions
-  	wakeup_idle(2);
-  	HAL_Delay(10);
-  	wakeup_idle(2);
+  wakeup_sleep(1);
+  //HAL_Delay(10);
+  wakeup_idle(1);
 
   /* USER CODE END 2 */
 
@@ -495,12 +500,11 @@ int main(void)
   {
 	  //HAL_UART_Receive (&huart2, Rx_data, 4, 1000);
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3); //toggle status LED
-	  //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_11); //toggle precharge relay
-	  //HAL_UART_Transmit(&huart2,char_data,sizeof(char_data),10);
 	  write_to_csvfile();
 	  HAL_Delay(250);
 	  //send CAN message // TO DO:check CAN message reception on BluePill
 	  HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+	  wakeup_idle(1);
 
 	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback
 	  {
