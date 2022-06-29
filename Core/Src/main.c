@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
+#include "driverSWLTC6804.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -100,12 +101,17 @@ uint32_t TxMailbox;
 int CAN_data_checkFlag = 0;
 
 
-//LTC6811 parameters
+//LTC681x parameters
 #define CS_PORT GPIOA
 #define CS_PIN GPIO_PIN_4
 #define SPI1_TIMEOUT 100
+#define NoOfCellMonitorsPossibleOnBMS 1
+#define cellMonitorICCount 1
 uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
+float cellModuleVoltages[1][18];
+uint32_t cellModuleBalanceResistorEnableMask[NoOfCellMonitorsPossibleOnBMS];
+uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
 
 
 /*******************************************************************************/
@@ -233,6 +239,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)  //interrupt callback function fo
     	}
     }
 }
+
+//Generic function for wake up serial interface of AFE (LTC681x)
 
 void wakeup_idle(uint8_t total_ic) //Number of ICs in the system
 {
@@ -413,6 +421,73 @@ void sd_init(void)
 	//  	}
 
 }
+
+//void CellMonitorsArrayTranslate(void) {
+//	uint8_t individualCellPointer = 0;
+//
+//  for(uint8_t modulePointer = 0; modulePointer < cellMonitorICCount; modulePointer++) {
+//		if((modulePointer+1) % (cellMonitorICCount/noOfParallelModules)==0 && modulePointer != 0){ // If end of series string, use lastICNoOfCells instead of noOfCellsPerModule
+//			for(uint8_t modulePointerCell = 0; modulePointerCell < modPowerElectronicsGeneralConfigHandle->lastICNoOfCells; modulePointerCell++) {
+//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellVoltage = modPowerElectronicsPackStateHandle->cellModuleVoltages[modulePointer][modulePointerCell];
+//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
+//			}
+//		}else{ // use noOfCellsPerModule as usually
+//			for(uint8_t modulePointerCell = 0; modulePointerCell < modPowerElectronicsGeneralConfigHandle->noOfCellsPerModule; modulePointerCell++) {
+//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellVoltage = modPowerElectronicsPackStateHandle->cellModuleVoltages[modulePointer][modulePointerCell];
+//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
+//			}
+//		};
+//	}
+//}
+
+
+void init_LTC6813(void)
+{
+	driverLTC6804ConfigStructTypedef configStruct;
+	configStruct.GPIO1                    = true;																														// Do not pull down this pin (false = pull down)
+	configStruct.GPIO2                    = true;																														//
+	configStruct.GPIO3                    = true;																														//
+	configStruct.GPIO4                    = true;																														//
+	configStruct.GPIO5                    = true;																														//
+	configStruct.GPIO6                    = true;																														//
+	configStruct.GPIO7                    = true;																														//
+	configStruct.GPIO8                    = true;																														//
+	configStruct.GPIO9                    = true;																														//
+	configStruct.ReferenceON              = true;																														// Reference ON
+	configStruct.ADCOption                = true;																											  		// ADC Option register for configuration of over sampling ratio
+	configStruct.noOfCells                = 16;			// Number of cells to monitor (that can cause interrupt)
+	configStruct.DisChargeEnableMask      = 0x00000000;	// Set enable state of discharge, 1=EnableDischarge, 0=DisableDischarge
+	configStruct.DischargeTimout          = 0;		// Discharge timout value / limit
+	configStruct.CellUnderVoltageLimit    = 2.80f; // Undervoltage level, cell voltages under this limit will cause interrupt
+	configStruct.CellOverVoltageLimit     = 4.20f;
+
+	driverSWLTC6804Init(configStruct, 1, 18, 7,CELL_MON_LTC6813_1);
+
+	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++) {
+		for(uint8_t cellPointer = 0; cellPointer < 18; cellPointer++)
+			cellModuleVoltages[modulePointer][cellPointer] = 0.0f;
+
+		cellModuleBalanceResistorEnableMask[modulePointer] = 0;
+		cellModuleBalanceResistorEnableMaskTest[modulePointer] = 0;
+	}
+
+}
+void unit_test_LTC6813(void)
+{
+	driverSWLTC6804ResetCellVoltageRegisters();
+	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
+	//HAL_Delay(300);
+	if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
+	{
+		sprintf(buffer,"C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
+				cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+				cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+				cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17],cellModuleVoltages[0][18]);
+		send_uart(buffer);
+		clear_buffer();
+	}
+}
 /*******************************************************************************/
 /* USER CODE END 0 */
 
@@ -488,10 +563,9 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, SET); //turn ON HV+ contactor
 
   	//TO DO:add LTC6811 library files/use driverSWLTC6804 functions
-  wakeup_sleep(1);
-  //HAL_Delay(10);
-  wakeup_idle(1);
-
+  //wakeup_sleep(1);
+  //wakeup_idle(1);
+  init_LTC6813();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -504,7 +578,9 @@ int main(void)
 	  HAL_Delay(250);
 	  //send CAN message // TO DO:check CAN message reception on BluePill
 	  HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
-	  wakeup_idle(1);
+
+	  //wakeup_idle(1);
+	  unit_test_LTC6813();
 
 	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback
 	  {

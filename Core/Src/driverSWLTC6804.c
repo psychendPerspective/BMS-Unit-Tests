@@ -102,7 +102,7 @@ void driverSWLTC6804ResetStatusRegisters(void) {
   cmd[2] = (uint8_t)(cmd_pec >> 8);
   cmd[3] = (uint8_t)(cmd_pec );
 
-	driverSWLTC6804WakeIC();
+  driverSWLTC6804WakeIC();
   driverSWLTC6804Write(cmd,4);
 }
 
@@ -120,7 +120,7 @@ void driverSWLTC6804StartCellAndAuxVoltageConversion(uint8_t MD,uint8_t DCP) {
   cmd[2] = (uint8_t)(cmd_pec >> 8);
   cmd[3] = (uint8_t)(cmd_pec);
 
-	driverSWLTC6804WakeIC();
+  driverSWLTC6804WakeIC();
   driverSWLTC6804Write(cmd,4);
 }
 
