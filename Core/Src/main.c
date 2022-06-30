@@ -76,7 +76,8 @@ UINT br, bw;  // File read/write count
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-uint8_t dummy_timer, dummy_cell_votlages, dummy_pack_voltage, dummy_pack_current, dummy_temperature;
+uint8_t dummy_timer, dummy_cell_votlages, dummy_pack_voltage;
+float dummy_pack_current, dummy_temperature;
 uint8_t char_data[] = "Xanadu BMS v1.0 Unit Test in progress \r\n";
 
 /**** SD card capacity related *****/
@@ -112,7 +113,8 @@ uint8_t SPI1_pRxData[8];
 float cellModuleVoltages[1][18];
 uint32_t cellModuleBalanceResistorEnableMask[NoOfCellMonitorsPossibleOnBMS];
 uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
-
+cellMonitorCellsTypeDef cellVoltagesIndividual[18]; //18:Total no of cells possible
+float packVoltage, packCurrent;
 
 /*******************************************************************************/
 int bufsize (char *buf)
@@ -136,16 +138,20 @@ void send_uart (char *string)
 void write_to_csvfile (void)
 {
 
-		  dummy_timer += 1;
-		  dummy_cell_votlages += 1;
-		  dummy_pack_voltage += 11;
-		  dummy_pack_current += 1;
-		  dummy_temperature += 5;
+		  //dummy_timer += 1;
+		  //dummy_cell_votlages += 1;
+		  //dummy_pack_voltage += 11;
+
+		  dummy_pack_current += 0.1;
+		  dummy_temperature += 1.0;
 
 		  fresult = f_open(&fil, "file3.csv", FA_OPEN_EXISTING | FA_READ | FA_WRITE);
 		  /* Move to offset to the end of the file */
 		  fresult = f_lseek(&fil, f_size(&fil));
-		  sprintf(buffer, "%d,%d,%d,%d,%d\r\n", dummy_timer, dummy_cell_votlages, dummy_pack_voltage, dummy_pack_current, dummy_temperature);
+		  sprintf(buffer, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f \r\n",
+				  	(HAL_GetTick()/ 1000.0),cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+					cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17], packVoltage, dummy_pack_current, dummy_temperature);
 		  fresult = f_write(&fil, buffer, bufsize(buffer), &bw);
 		  //send_uart(buffer);
 		  f_close (&fil);
@@ -396,7 +402,7 @@ void sd_init(void)
 	  	/*Create csv file to log random data*/
 	  	fresult = f_open(&fil, "file3.csv", FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
 	  	/* Writing text */
-	  	f_puts("Timer(s), Cell_Voltages, Pack_Voltage, Pack_Current, Temperature\r\n ", &fil);
+	  	f_puts("Timer(s), Cell_Voltage_1,Cell_Voltage_2,Cell_Voltage_3,Cell_Voltage_4,Cell_Voltage_5,Cell_Voltage_6,Cell_Voltage_7,Cell_Voltage_8,Cell_Voltage_9,Cell_Voltage_10,Cell_Voltage_11,Cell_Voltage_12,Cell_Voltage_13,Cell_Voltage_14,Cell_Voltage_15,Cell_Voltage_16,Cell_Voltage_17,Cell_Voltage_18, Pack_Voltage, Pack_Current, Temperature\r\n ", &fil);
 	  	/* Close file */
 	  	fresult = f_close(&fil);
 	  	if (fresult == FR_OK)
@@ -422,23 +428,24 @@ void sd_init(void)
 
 }
 
-//void CellMonitorsArrayTranslate(void) {
-//	uint8_t individualCellPointer = 0;
-//
-//  for(uint8_t modulePointer = 0; modulePointer < cellMonitorICCount; modulePointer++) {
-//		if((modulePointer+1) % (cellMonitorICCount/noOfParallelModules)==0 && modulePointer != 0){ // If end of series string, use lastICNoOfCells instead of noOfCellsPerModule
-//			for(uint8_t modulePointerCell = 0; modulePointerCell < modPowerElectronicsGeneralConfigHandle->lastICNoOfCells; modulePointerCell++) {
-//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellVoltage = modPowerElectronicsPackStateHandle->cellModuleVoltages[modulePointer][modulePointerCell];
-//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
-//			}
-//		}else{ // use noOfCellsPerModule as usually
-//			for(uint8_t modulePointerCell = 0; modulePointerCell < modPowerElectronicsGeneralConfigHandle->noOfCellsPerModule; modulePointerCell++) {
-//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellVoltage = modPowerElectronicsPackStateHandle->cellModuleVoltages[modulePointer][modulePointerCell];
-//				modPowerElectronicsPackStateHandle->cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
-//			}
-//		};
-//	}
-//}
+void CellMonitorsArrayTranslate(void)
+{
+	uint8_t individualCellPointer = 0;
+
+  for(uint8_t modulePointer = 0; modulePointer < cellMonitorICCount; modulePointer++) {
+		if((modulePointer+1) % (cellMonitorICCount/1)==0 && modulePointer != 0){ // If end of series string, use lastICNoOfCells instead of noOfCellsPerModule
+			for(uint8_t modulePointerCell = 0; modulePointerCell < 18; modulePointerCell++) {
+				cellVoltagesIndividual[individualCellPointer].cellVoltage = cellModuleVoltages[modulePointer][modulePointerCell];
+				cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
+			}
+		}else{ // use noOfCellsPerModule as usually
+			for(uint8_t modulePointerCell = 0; modulePointerCell < 18; modulePointerCell++) {
+				cellVoltagesIndividual[individualCellPointer].cellVoltage = cellModuleVoltages[modulePointer][modulePointerCell];
+				cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
+			}
+		};
+	}
+}
 
 
 void init_LTC6813(void)
@@ -455,7 +462,7 @@ void init_LTC6813(void)
 	configStruct.GPIO9                    = true;																														//
 	configStruct.ReferenceON              = true;																														// Reference ON
 	configStruct.ADCOption                = true;																											  		// ADC Option register for configuration of over sampling ratio
-	configStruct.noOfCells                = 16;			// Number of cells to monitor (that can cause interrupt)
+	configStruct.noOfCells                = 18;			// Number of cells to monitor (that can cause interrupt)
 	configStruct.DisChargeEnableMask      = 0x00000000;	// Set enable state of discharge, 1=EnableDischarge, 0=DisableDischarge
 	configStruct.DischargeTimout          = 0;		// Discharge timout value / limit
 	configStruct.CellUnderVoltageLimit    = 2.80f; // Undervoltage level, cell voltages under this limit will cause interrupt
@@ -463,7 +470,8 @@ void init_LTC6813(void)
 
 	driverSWLTC6804Init(configStruct, 1, 18, 7,CELL_MON_LTC6813_1);
 
-	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++) {
+	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++)
+	{
 		for(uint8_t cellPointer = 0; cellPointer < 18; cellPointer++)
 			cellModuleVoltages[modulePointer][cellPointer] = 0.0f;
 
@@ -471,22 +479,31 @@ void init_LTC6813(void)
 		cellModuleBalanceResistorEnableMaskTest[modulePointer] = 0;
 	}
 
+	driverSWLTC6804ResetCellVoltageRegisters();
+	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+
 }
 void unit_test_LTC6813(void)
 {
-	driverSWLTC6804ResetCellVoltageRegisters();
-	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+
 	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 	//HAL_Delay(300);
 	if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
 	{
+		CellMonitorsArrayTranslate();
 		sprintf(buffer,"C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
-				cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+				cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
 				cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
-				cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17],cellModuleVoltages[0][18]);
+				cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17]);
 		send_uart(buffer);
 		clear_buffer();
+		packVoltage = cellModuleVoltages[0][0] + cellModuleVoltages[0][1] + cellModuleVoltages[0][2] + cellModuleVoltages[0][3] + cellModuleVoltages[0][4] + cellModuleVoltages[0][5] + cellModuleVoltages[0][6] +
+				cellModuleVoltages[0][7] + cellModuleVoltages[0][8] + cellModuleVoltages[0][9] + cellModuleVoltages[0][10] + cellModuleVoltages[0][11] + cellModuleVoltages[0][12] +
+				cellModuleVoltages[0][13] + cellModuleVoltages[0][14] + cellModuleVoltages[0][15] + cellModuleVoltages[0][16] + cellModuleVoltages[0][17] ;
 	}
+
+	driverSWLTC6804ResetCellVoltageRegisters();
+	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
 }
 /*******************************************************************************/
 /* USER CODE END 0 */
@@ -574,7 +591,6 @@ int main(void)
   {
 	  //HAL_UART_Receive (&huart2, Rx_data, 4, 1000);
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3); //toggle status LED
-	  write_to_csvfile();
 	  HAL_Delay(250);
 	  //send CAN message // TO DO:check CAN message reception on BluePill
 	  HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
@@ -601,6 +617,7 @@ int main(void)
 	  }
 
 	  get_time();  //print RTC
+	  write_to_csvfile();
 	  HAL_Delay(250);
 
     /* USER CODE END WHILE */
