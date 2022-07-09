@@ -20,6 +20,7 @@
 #include "main.h"
 #include "fatfs.h"
 #include "driverSWLTC6804.h"
+#include "stdio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -108,12 +109,18 @@ int CAN_data_checkFlag = 0;
 #define SPI1_TIMEOUT 100
 #define NoOfCellMonitorsPossibleOnBMS 1
 #define cellMonitorICCount 1
+#define noOfTempSensorPerModule 10
+#define NTCnominalResistance 10000
+#define NTCbetaFactor 3435
+#define NTCseriesResistor 10000
 uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
 float cellModuleVoltages[1][18];
+float auxModuleVoltages[1][9];
 uint32_t cellModuleBalanceResistorEnableMask[NoOfCellMonitorsPossibleOnBMS];
 uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
 cellMonitorCellsTypeDef cellVoltagesIndividual[18]; //18:Total no of cells possible
+auxMonitorTypeDef auxVoltagesIndividual[9];
 float packVoltage, packCurrent;
 
 /*******************************************************************************/
@@ -447,6 +454,25 @@ void CellMonitorsArrayTranslate(void)
 	}
 }
 
+void AuxMonitorsArrayTranslate(void) {
+	uint8_t individualAuxPointer = 0;
+
+  for(uint8_t modulePointer = 0; modulePointer < cellMonitorICCount; modulePointer++) {
+	  for(uint8_t modulePointerAux = 0;modulePointerAux < noOfTempSensorPerModule; modulePointerAux++) {
+			if(modulePointerAux < 5)
+			{
+				auxVoltagesIndividual[individualAuxPointer].auxVoltage = auxModuleVoltages[modulePointer][modulePointerAux];
+				auxVoltagesIndividual[individualAuxPointer].auxNumber = individualAuxPointer++;
+			}
+			else
+			{ // when above 5, remove reference voltage measurement from Aux register group B : AVBR4 & AVBR5 for LTC6812 & LTC6813
+				auxVoltagesIndividual[individualAuxPointer].auxVoltage = auxModuleVoltages[modulePointer][modulePointerAux+1];
+				auxVoltagesIndividual[individualAuxPointer].auxNumber = individualAuxPointer++;
+			}
+		}
+	}
+}
+
 
 void init_LTC6813(void)
 {
@@ -468,7 +494,7 @@ void init_LTC6813(void)
 	configStruct.CellUnderVoltageLimit    = 2.80f; // Undervoltage level, cell voltages under this limit will cause interrupt
 	configStruct.CellOverVoltageLimit     = 4.20f;
 
-	driverSWLTC6804Init(configStruct, 1, 18, 7,CELL_MON_LTC6813_1);
+	driverSWLTC6804Init(configStruct, NoOfCellMonitorsPossibleOnBMS, 18, noOfTempSensorPerModule,CELL_MON_LTC6811_1);
 
 	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++)
 	{
@@ -478,9 +504,16 @@ void init_LTC6813(void)
 		cellModuleBalanceResistorEnableMask[modulePointer] = 0;
 		cellModuleBalanceResistorEnableMaskTest[modulePointer] = 0;
 	}
+	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++)
+	{
+		for(uint8_t auxPointer = 0; auxPointer < noOfTempSensorPerModule; auxPointer++)
+			auxModuleVoltages[modulePointer][auxPointer] = 0.0f;
+	}
 
 	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+	driverSWLTC6804ResetAuxRegisters();
+	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
 
 }
 void unit_test_LTC6813(void)
@@ -502,8 +535,21 @@ void unit_test_LTC6813(void)
 				cellModuleVoltages[0][13] + cellModuleVoltages[0][14] + cellModuleVoltages[0][15] + cellModuleVoltages[0][16] + cellModuleVoltages[0][17] ;
 	}
 
+	if(driverSWLTC6804ReadAuxVoltagesArray(auxModuleVoltages,NTCnominalResistance, NTCseriesResistor, NTCbetaFactor, 25.0f))
+	{
+		AuxMonitorsArrayTranslate();
+		sprintf(buffer,"T1:%f,T2:%f,T3:%f,T4:%f,T5:%f,T6:%f,T7:%f\r\n",
+				auxVoltagesIndividual[2].auxVoltage,auxVoltagesIndividual[3].auxVoltage,auxVoltagesIndividual[4].auxVoltage,
+				auxVoltagesIndividual[5].auxVoltage,auxVoltagesIndividual[6].auxVoltage,auxVoltagesIndividual[7].auxVoltage,
+				auxVoltagesIndividual[8].auxVoltage);
+				send_uart(buffer);
+				clear_buffer();
+	}
+
 	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+	driverSWLTC6804ResetAuxRegisters();
+	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
 }
 /*******************************************************************************/
 /* USER CODE END 0 */
@@ -768,8 +814,8 @@ static void MX_RTC_Init(void)
 
   /** Initialize RTC and set the Time and Date
   */
-  sTime.Hours = 0x0;
-  sTime.Minutes = 0x23;
+  sTime.Hours = 0x02;
+  sTime.Minutes = 0x03;
   sTime.Seconds = 0x0;
   sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
   sTime.StoreOperation = RTC_STOREOPERATION_RESET;
@@ -777,9 +823,9 @@ static void MX_RTC_Init(void)
   {
     Error_Handler();
   }
-  sDate.WeekDay = RTC_WEEKDAY_WEDNESDAY;
-  sDate.Month = RTC_MONTH_JUNE;
-  sDate.Date = 0x22;
+  sDate.WeekDay = RTC_WEEKDAY_SUNDAY;
+  sDate.Month = RTC_MONTH_JULY;
+  sDate.Date = 0x10;
   sDate.Year = 0x22;
 
   if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
