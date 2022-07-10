@@ -7349,7 +7349,7 @@ void cellBalancingTask(void)
  800392a:	d027      	beq.n	800397c <cellBalancingTask+0xac>
 		{
 
-			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer++)
+			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer += 2)
  800392c:	2300      	movs	r3, #0
  800392e:	71fb      	strb	r3, [r7, #7]
  8003930:	e021      	b.n	8003976 <cellBalancingTask+0xa6>
@@ -7386,9 +7386,9 @@ void cellBalancingTask(void)
  800396a:	4413      	add	r3, r2
  800396c:	2200      	movs	r2, #0
  800396e:	715a      	strb	r2, [r3, #5]
-			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer++)
+			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer += 2)
  8003970:	79fb      	ldrb	r3, [r7, #7]
- 8003972:	3301      	adds	r3, #1
+ 8003972:	3302      	adds	r3, #2
  8003974:	71fb      	strb	r3, [r7, #7]
  8003976:	79fb      	ldrb	r3, [r7, #7]
  8003978:	2b11      	cmp	r3, #17
@@ -7603,6 +7603,7 @@ void init_LTC6813(void)
  8003ae6:	1d3b      	adds	r3, r7, #4
  8003ae8:	cb0f      	ldmia	r3, {r0, r1, r2, r3}
  8003aea:	f7fd f9cf 	bl	8000e8c <driverSWLTC6804Init>
+
 	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++)
  8003aee:	2300      	movs	r3, #0
  8003af0:	f887 3027 	strb.w	r3, [r7, #39]	; 0x27

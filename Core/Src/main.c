@@ -528,7 +528,7 @@ void cellBalancingTask(void)
 		if(delaytoggle)
 		{
 
-			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer++)
+			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer += 2)
 			{
 				if(cellVoltagesIndividual[cellPointer].cellVoltage > (cellVoltageLow + cellBalanceThreshold))
 				{
@@ -584,6 +584,7 @@ void init_LTC6813(void)
 	configStruct.CellOverVoltageLimit     = 4.20f;
 
 	driverSWLTC6804Init(configStruct, NoOfCellMonitorsPossibleOnBMS, noOfTotalCells, noOfTempSensorPerModule,CELL_MON_LTC6811_1);
+
 	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++)
 	{
 		for(uint8_t cellPointer = 0; cellPointer < noOfTotalCells; cellPointer++)
