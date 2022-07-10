@@ -107,6 +107,7 @@ int CAN_data_checkFlag = 0;
 #define CS_PORT GPIOA
 #define CS_PIN GPIO_PIN_4
 #define SPI1_TIMEOUT 100
+#define noOfTotalCells 18
 #define NoOfCellMonitorsPossibleOnBMS 1
 #define cellMonitorICCount 1
 #define noOfTempSensorPerModule 10
@@ -115,13 +116,14 @@ int CAN_data_checkFlag = 0;
 #define NTCseriesResistor 10000
 uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
-float cellModuleVoltages[1][18];
+float cellModuleVoltages[1][noOfTotalCells];
 float auxModuleVoltages[1][9];
 uint32_t cellModuleBalanceResistorEnableMask[NoOfCellMonitorsPossibleOnBMS];
 uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
-cellMonitorCellsTypeDef cellVoltagesIndividual[18]; //18:Total no of cells possible
+cellMonitorCellsTypeDef cellVoltagesIndividual[noOfTotalCells]; //18:Total no of cells possible
 auxMonitorTypeDef auxVoltagesIndividual[9];
-float packVoltage, packCurrent;
+float packVoltage, packCurrent, cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage;
+
 
 /*******************************************************************************/
 int bufsize (char *buf)
@@ -440,13 +442,17 @@ void CellMonitorsArrayTranslate(void)
 	uint8_t individualCellPointer = 0;
 
   for(uint8_t modulePointer = 0; modulePointer < cellMonitorICCount; modulePointer++) {
-		if((modulePointer+1) % (cellMonitorICCount/1)==0 && modulePointer != 0){ // If end of series string, use lastICNoOfCells instead of noOfCellsPerModule
-			for(uint8_t modulePointerCell = 0; modulePointerCell < 18; modulePointerCell++) {
+		if((modulePointer+1) % (cellMonitorICCount/1)==0 && modulePointer != 0)
+		{ // If end of series string, use lastICNoOfCells instead of noOfCellsPerModule
+			for(uint8_t modulePointerCell = 0; modulePointerCell < noOfTotalCells; modulePointerCell++)
+			{
 				cellVoltagesIndividual[individualCellPointer].cellVoltage = cellModuleVoltages[modulePointer][modulePointerCell];
 				cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
 			}
-		}else{ // use noOfCellsPerModule as usually
-			for(uint8_t modulePointerCell = 0; modulePointerCell < 18; modulePointerCell++) {
+		}
+		else
+		{ // use noOfCellsPerModule as usually
+			for(uint8_t modulePointerCell = 0; modulePointerCell < noOfTotalCells; modulePointerCell++) {
 				cellVoltagesIndividual[individualCellPointer].cellVoltage = cellModuleVoltages[modulePointer][modulePointerCell];
 				cellVoltagesIndividual[individualCellPointer].cellNumber = individualCellPointer++;
 			}
@@ -473,6 +479,35 @@ void AuxMonitorsArrayTranslate(void) {
 	}
 }
 
+void calculateMaxandMinCellVoltages(void)
+{
+	cellVoltageHigh = 0.0f;
+	cellVoltageLow = 10.0f;
+	for(uint8_t cellPointer = 0; cellPointer < noOfTotalCells; cellPointer++)
+	{
+		if(cellVoltagesIndividual[cellPointer].cellVoltage > cellVoltageHigh)
+		{
+			cellVoltageHigh = cellVoltagesIndividual[cellPointer].cellVoltage;
+		}
+		if(cellVoltagesIndividual[cellPointer].cellVoltage < cellVoltageLow && cellVoltagesIndividual[cellPointer].cellVoltage > 0.5f)
+		{
+			cellVoltageLow = cellVoltagesIndividual[cellPointer].cellVoltage;
+		}
+	}
+	maxImbalanceVoltage = cellVoltageHigh - cellVoltageLow;
+	sprintf(buffer, "Max Cell Voltage = %.3f, Min Cell Voltage = %.3f , Max Imbalance Voltage = %.3f\r\n",cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage);
+	send_uart(buffer);
+	clear_buffer();
+
+}
+
+//void cellBalancingTask(void)
+//{
+//	for(uint8_t i = 0; i< 18; i++)
+//	{
+//		if(cellVoltagesIndividual[i].cellVoltage  )
+//	}
+//}
 
 void init_LTC6813(void)
 {
@@ -494,11 +529,10 @@ void init_LTC6813(void)
 	configStruct.CellUnderVoltageLimit    = 2.80f; // Undervoltage level, cell voltages under this limit will cause interrupt
 	configStruct.CellOverVoltageLimit     = 4.20f;
 
-	driverSWLTC6804Init(configStruct, NoOfCellMonitorsPossibleOnBMS, 18, noOfTempSensorPerModule,CELL_MON_LTC6811_1);
-
+	driverSWLTC6804Init(configStruct, NoOfCellMonitorsPossibleOnBMS, noOfTotalCells, noOfTempSensorPerModule,CELL_MON_LTC6811_1);
 	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++)
 	{
-		for(uint8_t cellPointer = 0; cellPointer < 18; cellPointer++)
+		for(uint8_t cellPointer = 0; cellPointer < noOfTotalCells; cellPointer++)
 			cellModuleVoltages[modulePointer][cellPointer] = 0.0f;
 
 		cellModuleBalanceResistorEnableMask[modulePointer] = 0;
@@ -643,6 +677,7 @@ int main(void)
 
 	  //wakeup_idle(1);
 	  unit_test_LTC6813();
+	  calculateMaxandMinCellVoltages();
 
 	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback
 	  {
