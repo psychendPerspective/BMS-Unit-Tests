@@ -107,19 +107,29 @@ int CAN_data_checkFlag = 0;
 #define CS_PORT GPIOA
 #define CS_PIN GPIO_PIN_4
 #define SPI1_TIMEOUT 100
+
 #define noOfTotalCells 18
 #define NoOfCellMonitorsPossibleOnBMS 1
 #define cellMonitorICCount 1
+
 #define noOfTempSensorPerModule 10
 #define NTCnominalResistance 10000
 #define NTCbetaFactor 3435
 #define NTCseriesResistor 10000
+
+#define cellBalanceUpdateTime 4*1000
+#define cellBalanceThreshold 0.010f
+#define noOfCellsSeries 18
+#define noOfParallelModules 1
+#define noOfCellsPerModule 18
+
 uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
 float cellModuleVoltages[1][noOfTotalCells];
 float auxModuleVoltages[1][9];
 uint32_t cellModuleBalanceResistorEnableMask[NoOfCellMonitorsPossibleOnBMS];
 uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
+uint32_t CellBalanceUpdateLastTick;
 cellMonitorCellsTypeDef cellVoltagesIndividual[noOfTotalCells]; //18:Total no of cells possible
 auxMonitorTypeDef auxVoltagesIndividual[9];
 float packVoltage, packCurrent, cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage;
@@ -501,13 +511,57 @@ void calculateMaxandMinCellVoltages(void)
 
 }
 
-//void cellBalancingTask(void)
-//{
-//	for(uint8_t i = 0; i< 18; i++)
-//	{
-//		if(cellVoltagesIndividual[i].cellVoltage  )
-//	}
-//}
+void cellBalancingTask(void)
+{
+	static uint32_t delayTimeHolder = 100;
+	static bool     delaytoggle = false;
+	uint8_t modulePointer = 0;
+	uint8_t cellInMaskPointer = 0;
+	uint8_t seriesCount = 0;
+	uint8_t moduleCount = 0;
+
+	if(modDelayTick1ms(&CellBalanceUpdateLastTick,delayTimeHolder))
+	{
+		delaytoggle ^= true;
+		delayTimeHolder = delaytoggle ? cellBalanceUpdateTime : 200;
+
+		if(delaytoggle)
+		{
+
+			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer++)
+			{
+				if(cellVoltagesIndividual[cellPointer].cellVoltage > (cellVoltageLow + cellBalanceThreshold))
+				{
+					cellVoltagesIndividual[cellPointer].cellBleedActive = true;
+				}
+				else
+				{
+					cellVoltagesIndividual[cellPointer].cellBleedActive = false;
+				}
+			}
+		}
+	}
+
+	// Clear array
+	for(uint8_t moduleClearPointer = 0; moduleClearPointer < NoOfCellMonitorsPossibleOnBMS; moduleClearPointer++)
+	{
+		cellModuleBalanceResistorEnableMask[moduleClearPointer] = 0;
+	}
+	for(uint8_t cellPointer = 0; cellPointer < noOfCellsSeries*noOfParallelModules; cellPointer++)
+	{
+		seriesCount = cellPointer/noOfCellsSeries;
+		moduleCount = seriesCount*(cellMonitorICCount/noOfParallelModules);
+		modulePointer = moduleCount + (cellPointer % noOfCellsSeries)/noOfCellsPerModule;
+		cellInMaskPointer = (cellPointer - (seriesCount*noOfCellsSeries)) % noOfCellsPerModule;
+
+		if(cellVoltagesIndividual[cellPointer].cellBleedActive)
+			cellModuleBalanceResistorEnableMask[modulePointer] |= (1 << cellInMaskPointer);
+		else
+			cellModuleBalanceResistorEnableMask[modulePointer] &= ~(1 << cellInMaskPointer);
+	}
+
+	driverSWLTC6804EnableBalanceResistorsArray(cellModuleBalanceResistorEnableMask, CELL_MON_LTC6811_1);
+}
 
 void init_LTC6813(void)
 {
@@ -546,8 +600,12 @@ void init_LTC6813(void)
 
 	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
 	driverSWLTC6804ResetAuxRegisters();
 	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
+	//driverSWLTC6804StartLoadedCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL,true);
+	//driverSWLTC6804ResetAuxRegisters();
+	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 
 }
 void unit_test_LTC6813(void)
@@ -582,6 +640,7 @@ void unit_test_LTC6813(void)
 
 	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
 	driverSWLTC6804ResetAuxRegisters();
 	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
 }
@@ -678,6 +737,7 @@ int main(void)
 	  //wakeup_idle(1);
 	  unit_test_LTC6813();
 	  calculateMaxandMinCellVoltages();
+	  cellBalancingTask();
 
 	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback
 	  {
