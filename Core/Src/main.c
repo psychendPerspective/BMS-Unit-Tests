@@ -123,6 +123,8 @@ int CAN_data_checkFlag = 0;
 #define noOfParallelModules 1
 #define noOfCellsPerModule 18
 
+bool cellBalancingEnable = true;
+
 uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
 float cellModuleVoltages[1][noOfTotalCells];
@@ -162,15 +164,15 @@ void write_to_csvfile (void)
 		  //dummy_pack_voltage += 11;
 
 		  dummy_pack_current += 0.1;
-		  dummy_temperature += 1.0;
+		  //dummy_temperature += 1.0;
 
 		  fresult = f_open(&fil, "file3.csv", FA_OPEN_EXISTING | FA_READ | FA_WRITE);
 		  /* Move to offset to the end of the file */
 		  fresult = f_lseek(&fil, f_size(&fil));
-		  sprintf(buffer, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f \r\n",
+		  sprintf(buffer, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f \r\n",
 				  	(HAL_GetTick()/ 1000.0),cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
 					cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
-					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17], packVoltage, dummy_pack_current, dummy_temperature);
+					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17], packVoltage, dummy_pack_current,auxVoltagesIndividual[4].auxVoltage, auxVoltagesIndividual[5].auxVoltage, cellVoltageHigh, cellVoltageLow );
 		  fresult = f_write(&fil, buffer, bufsize(buffer), &bw);
 		  //send_uart(buffer);
 		  f_close (&fil);
@@ -421,7 +423,7 @@ void sd_init(void)
 	  	/*Create csv file to log random data*/
 	  	fresult = f_open(&fil, "file3.csv", FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
 	  	/* Writing text */
-	  	f_puts("Timer(s), Cell_Voltage_1,Cell_Voltage_2,Cell_Voltage_3,Cell_Voltage_4,Cell_Voltage_5,Cell_Voltage_6,Cell_Voltage_7,Cell_Voltage_8,Cell_Voltage_9,Cell_Voltage_10,Cell_Voltage_11,Cell_Voltage_12,Cell_Voltage_13,Cell_Voltage_14,Cell_Voltage_15,Cell_Voltage_16,Cell_Voltage_17,Cell_Voltage_18, Pack_Voltage, Pack_Current, Temperature\r\n ", &fil);
+	  	f_puts("Timer(s), Cell_Voltage_1,Cell_Voltage_2,Cell_Voltage_3,Cell_Voltage_4,Cell_Voltage_5,Cell_Voltage_6,Cell_Voltage_7,Cell_Voltage_8,Cell_Voltage_9,Cell_Voltage_10,Cell_Voltage_11,Cell_Voltage_12,Cell_Voltage_13,Cell_Voltage_14,Cell_Voltage_15,Cell_Voltage_16,Cell_Voltage_17,Cell_Voltage_18, Pack_Voltage, Pack_Current, Temperature_3, Temperature_4, Max_cell_voltage, Min_cell_voltage \r\n ", &fil);
 	  	/* Close file */
 	  	fresult = f_close(&fil);
 	  	if (fresult == FR_OK)
@@ -530,7 +532,7 @@ void cellBalancingTask(void)
 
 			for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer += 2)
 			{
-				if(cellVoltagesIndividual[cellPointer].cellVoltage > (cellVoltageLow + cellBalanceThreshold))
+				if(cellVoltagesIndividual[cellPointer].cellVoltage > (cellVoltageLow + cellBalanceThreshold) && cellBalancingEnable == true)
 				{
 					cellVoltagesIndividual[cellPointer].cellBleedActive = true;
 				}
@@ -538,6 +540,12 @@ void cellBalancingTask(void)
 				{
 					cellVoltagesIndividual[cellPointer].cellBleedActive = false;
 				}
+			}
+			if(cellBalancingEnable == false)
+			{
+				for(uint8_t cellPointer = 0; cellPointer< noOfTotalCells ; cellPointer++)
+					cellVoltagesIndividual[cellPointer].cellBleedActive = false;
+
 			}
 		}
 	}
