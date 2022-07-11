@@ -726,5 +726,585 @@ float driverSWLTC6804ConvertTemperatureExt(uint16_t inputValue,uint32_t ntcNomin
   return steinhart;
 }
 
+/*
+Generic function to write 68xx commands and write payload data.
+Function calculates PEC for tx_cmd data and the data to be transmitted.
+ */
+void write_68(uint8_t total_ic, //Number of ICs to be written to
+			  uint8_t tx_cmd[2], //The command to be transmitted
+			  uint8_t data[] // Payload Data
+			  )
+{
+	const uint8_t BYTES_IN_REG = 6;
+	const uint8_t CMD_LEN = 4+(8*total_ic);
+	uint8_t *cmd;
+	uint16_t data_pec;
+	uint16_t cmd_pec;
+	uint8_t cmd_index;
+
+	cmd = (uint8_t *)malloc(CMD_LEN*sizeof(uint8_t));
+	cmd[0] = tx_cmd[0];
+	cmd[1] = tx_cmd[1];
+	cmd_pec = driverSWLTC6804CalcPEC15(2, cmd);
+	cmd[2] = (uint8_t)(cmd_pec >> 8);
+	cmd[3] = (uint8_t)(cmd_pec);
+
+	cmd_index = 4;
+	for (uint8_t current_ic = total_ic; current_ic > 0; current_ic--)               // Executes for each LTC681x, this loops starts with the last IC on the stack.
+    {	                                                                            //The first configuration written is received by the last IC in the daisy chain
+		for (uint8_t current_byte = 0; current_byte < BYTES_IN_REG; current_byte++)
+		{
+			cmd[cmd_index] = data[((current_ic-1)*6)+current_byte];
+			cmd_index = cmd_index + 1;
+		}
+
+		data_pec = (uint16_t)driverSWLTC6804CalcPEC15(BYTES_IN_REG, &data[(current_ic-1)*6]);    // Calculating the PEC for each ICs configuration register data
+		cmd[cmd_index] = (uint8_t)(data_pec >> 8);
+		cmd[cmd_index + 1] = (uint8_t)data_pec;
+		cmd_index = cmd_index + 2;
+	}
 
 
+	driverSWLTC6804WakeIC();
+	driverSWLTC6804Write(cmd,CMD_LEN);
+	free(cmd);
+}
+
+/* Generic function to write 68xx commands and read data. Function calculated PEC for tx_cmd data */
+int8_t read_68( uint8_t total_ic, // Number of ICs in the system
+				uint8_t tx_cmd[2], // The command to be transmitted
+				uint8_t *rx_data // Data to be read
+				)
+{
+	const uint8_t BYTES_IN_REG = 8;
+	uint8_t cmd[4];
+	uint8_t data[256];
+	int8_t pec_error = 0;
+	uint16_t cmd_pec;
+	uint16_t data_pec;
+	uint16_t received_pec;
+
+	cmd[0] = tx_cmd[0];
+	cmd[1] = tx_cmd[1];
+	cmd_pec = driverSWLTC6804CalcPEC15(2, cmd);
+	cmd[2] = (uint8_t)(cmd_pec >> 8);
+	cmd[3] = (uint8_t)(cmd_pec);
+
+	driverSWLTC6804WriteRead(cmd, 4, data, (BYTES_IN_REG*total_ic));        //Transmits the command and reads the configuration data of all ICs on the daisy chain into rx_data[] array
+
+	for (uint8_t current_ic = 0; current_ic < total_ic; current_ic++) //Executes for each LTC681x in the daisy chain and packs the data
+	{																//into the rx_data array as well as check the received data for any bit errors
+		for (uint8_t current_byte = 0; current_byte < BYTES_IN_REG; current_byte++)
+		{
+			rx_data[(current_ic*8)+current_byte] = data[current_byte + (current_ic*BYTES_IN_REG)];
+		}
+
+		received_pec = (rx_data[(current_ic*8)+6]<<8) + rx_data[(current_ic*8)+7];
+		data_pec = driverSWLTC6804CalcPEC15(6, &rx_data[current_ic*8]);
+
+		if (received_pec != data_pec)
+		{
+		  pec_error = -1;
+		}
+	}
+
+	return(pec_error);
+}
+
+
+/* Helper function to set discharge bit in CFG register */
+void LTC6813_set_discharge(int Cell, // Cell to be discharged
+						   uint8_t total_ic, // Number of ICs in the system
+						   cell_asic *ic // A two dimensional array that will store the data
+						   )
+{
+	for (int i=0; i<total_ic; i++)
+	{
+		if (Cell==0)
+		{
+		  ic[i].configb.tx_data[1] = ic[i].configb.tx_data[1] |(0x04);
+		}
+		else if (Cell<9)
+		{
+		  ic[i].config.tx_data[4] = ic[i].config.tx_data[4] | (1<<(Cell-1));
+		}
+		else if (Cell < 13)
+		{
+		  ic[i].config.tx_data[5] = ic[i].config.tx_data[5] | (1<<(Cell-9));
+		}
+		else if (Cell<17)
+		{
+		  ic[i].configb.tx_data[0] = ic[i].configb.tx_data[0] | (1<<(Cell-9));
+		}
+		else if (Cell<19)
+		{
+		  ic[i].configb.tx_data[1] = ic[i].configb.tx_data[1] | (1<<(Cell-17));
+		}
+		else
+		{
+			break;
+		}
+	}
+}
+
+/* Clears all of the DCC bits in the configuration registers */
+void LTC681x_clear_discharge(uint8_t total_ic, // Number of ICs in the daisy chain
+							 cell_asic *ic // A two dimensional array that will store the data
+							 )
+{
+	for (int i=0; i<total_ic; i++)
+	{
+	   ic[i].config.tx_data[4] = 0;
+	   ic[i].config.tx_data[5] =ic[i].config.tx_data[5]&(0xF0);
+	   ic[i].configb.tx_data[0]=ic[i].configb.tx_data[0]&(0x0F);
+	   ic[i].configb.tx_data[1]=ic[i].configb.tx_data[1]&(0xF0);
+	}
+}
+
+/* Writes the pwm register */
+void LTC681x_wrpwm(uint8_t total_ic, // Number of ICs in the daisy chain
+                   uint8_t pwmReg, // The PWM Register to be written A or B
+                   cell_asic ic[] // A two dimensional array that stores the data to be written
+                  )
+{
+	uint8_t cmd[2];
+	uint8_t write_buffer[256];
+	uint8_t write_count = 0;
+	uint8_t c_ic = 0;
+	if (pwmReg == 0)
+	{
+	cmd[0] = 0x00;
+	cmd[1] = 0x20;
+	}
+	else
+	{
+	cmd[0] = 0x00;
+	cmd[1] = 0x1C;
+	}
+
+	for (uint8_t current_ic = 0; current_ic<total_ic; current_ic++)
+	{
+		if (ic->isospi_reverse == false)
+		{
+			c_ic = current_ic;
+		}
+		else
+		{
+			c_ic = total_ic - current_ic - 1;
+		}
+
+		for (uint8_t data = 0; data<6; data++)
+		{
+			write_buffer[write_count] = ic[c_ic].pwm.tx_data[data];
+			write_count++;
+		}
+	}
+	write_68(total_ic, cmd, write_buffer);
+}
+
+
+/* Reads pwm registers of a LTC681x daisy chain */
+int8_t LTC681x_rdpwm(uint8_t total_ic, //Number of ICs in the system
+                     uint8_t pwmReg, // The PWM Register to be written A or B
+                     cell_asic ic[] // A two dimensional array that will store the data
+                    )
+{
+	const uint8_t BYTES_IN_REG = 8;
+	uint8_t cmd[4];
+	uint8_t read_buffer[256];
+	int8_t pec_error = 0;
+	uint16_t data_pec;
+	uint16_t calc_pec;
+	uint8_t c_ic = 0;
+
+	if (pwmReg == 0)
+	{
+		cmd[0] = 0x00;
+		cmd[1] = 0x22;
+	}
+	else
+	{
+		cmd[0] = 0x00;
+		cmd[1] = 0x1E;
+	}
+
+	pec_error = read_68(total_ic, cmd, read_buffer);
+	for (uint8_t current_ic =0; current_ic<total_ic; current_ic++)
+	{
+		if (ic->isospi_reverse == false)
+		{
+			c_ic = current_ic;
+		}
+		else
+		{
+			c_ic = total_ic - current_ic - 1;
+		}
+
+		for (int byte=0; byte<8; byte++)
+		{
+			ic[c_ic].pwm.rx_data[byte] = read_buffer[byte+(8*current_ic)];
+		}
+
+		calc_pec = driverSWLTC6804CalcPEC15(6,&read_buffer[8*current_ic]);
+		data_pec = read_buffer[7+(8*current_ic)] | (read_buffer[6+(8*current_ic)]<<8);
+		if (calc_pec != data_pec )
+		{
+			ic[c_ic].pwm.rx_pec_match = 1;
+		}
+		else ic[c_ic].pwm.rx_pec_match = 0;
+	}
+	return(pec_error);
+}
+
+void LTC6813_set_cfgr(uint8_t nIC, cell_asic *ic, bool refon, bool adcopt, bool gpio[5],bool dcc[12],bool dcto[4], uint16_t uv, uint16_t  ov)
+{
+    LTC681x_set_cfgr_refon(nIC,ic,refon);
+    LTC681x_set_cfgr_adcopt(nIC,ic,adcopt);
+    LTC681x_set_cfgr_gpio(nIC,ic,gpio);
+    LTC681x_set_cfgr_dis(nIC,ic,dcc);
+	LTC681x_set_cfgr_dcto(nIC,ic,dcto);
+	LTC681x_set_cfgr_uv(nIC, ic, uv);
+    LTC681x_set_cfgr_ov(nIC, ic, ov);
+}
+
+void LTC681x_set_cfgr_refon(uint8_t nIC, cell_asic *ic, bool refon)
+{
+	if (refon) ic[nIC].config.tx_data[0] = ic[nIC].config.tx_data[0]|0x04;
+	else ic[nIC].config.tx_data[0] = ic[nIC].config.tx_data[0]&0xFB;
+}
+
+/* Helper function to set the ADCOPT bit */
+void LTC681x_set_cfgr_adcopt(uint8_t nIC, cell_asic *ic, bool adcopt)
+{
+	if (adcopt) ic[nIC].config.tx_data[0] = ic[nIC].config.tx_data[0]|0x01;
+	else ic[nIC].config.tx_data[0] = ic[nIC].config.tx_data[0]&0xFE;
+}
+
+/* Helper function to set GPIO bits */
+void LTC681x_set_cfgr_gpio(uint8_t nIC, cell_asic *ic,bool gpio[5])
+{
+	for (int i =0; i<5; i++)
+	{
+		if (gpio[i])ic[nIC].config.tx_data[0] = ic[nIC].config.tx_data[0]|(0x01<<(i+3));
+		else ic[nIC].config.tx_data[0] = ic[nIC].config.tx_data[0]&(~(0x01<<(i+3)));
+	}
+}
+
+/* Helper function to control discharge */
+void LTC681x_set_cfgr_dis(uint8_t nIC, cell_asic *ic,bool dcc[12])
+{
+	for (int i =0; i<8; i++)
+	{
+		if (dcc[i])ic[nIC].config.tx_data[4] = ic[nIC].config.tx_data[4]|(0x01<<i);
+		else ic[nIC].config.tx_data[4] = ic[nIC].config.tx_data[4]& (~(0x01<<i));
+	}
+	for (int i =0; i<4; i++)
+	{
+		if (dcc[i+8])ic[nIC].config.tx_data[5] = ic[nIC].config.tx_data[5]|(0x01<<i);
+		else ic[nIC].config.tx_data[5] = ic[nIC].config.tx_data[5]&(~(0x01<<i));
+	}
+}
+
+/* Helper function to control discharge time value */
+void LTC681x_set_cfgr_dcto(uint8_t nIC, cell_asic *ic,bool dcto[4])
+{
+	for(int i =0;i<4;i++)
+	{
+		if(dcto[i])ic[nIC].config.tx_data[5] = ic[nIC].config.tx_data[5]|(0x01<<(i+4));
+		else ic[nIC].config.tx_data[5] = ic[nIC].config.tx_data[5]&(~(0x01<<(i+4)));
+	}
+}
+
+/* Helper Function to set UV value in CFG register */
+void LTC681x_set_cfgr_uv(uint8_t nIC, cell_asic *ic,uint16_t uv)
+{
+	uint16_t tmp = (uv/16)-1;
+	ic[nIC].config.tx_data[1] = 0x00FF & tmp;
+	ic[nIC].config.tx_data[2] = ic[nIC].config.tx_data[2]&0xF0;
+	ic[nIC].config.tx_data[2] = ic[nIC].config.tx_data[2]|((0x0F00 & tmp)>>8);
+}
+
+/* Helper function to set OV value in CFG register */
+void LTC681x_set_cfgr_ov(uint8_t nIC, cell_asic *ic,uint16_t ov)
+{
+	uint16_t tmp = (ov/16);
+	ic[nIC].config.tx_data[3] = 0x00FF & (tmp>>4);
+	ic[nIC].config.tx_data[2] = ic[nIC].config.tx_data[2]&0x0F;
+	ic[nIC].config.tx_data[2] = ic[nIC].config.tx_data[2]|((0x000F & tmp)<<4);
+}
+
+
+/********************* Functions to set configuration register B for LTC6813 ************************/
+
+void LTC6813_set_cfgrb(uint8_t nIC, cell_asic *ic,bool fdrf,bool dtmen,bool ps[2],bool gpiobits[4],bool dccbits[7])
+{
+    LTC6813_set_cfgrb_fdrf(nIC,ic,fdrf);
+    LTC6813_set_cfgrb_dtmen(nIC,ic,dtmen);
+    LTC6813_set_cfgrb_ps(nIC,ic,ps);
+    LTC6813_set_cfgrb_gpio_b(nIC,ic,gpiobits);
+	LTC6813_set_cfgrb_dcc_b(nIC,ic,dccbits);
+}
+
+/* Helper function to set the FDRF bit */
+void LTC6813_set_cfgrb_fdrf(uint8_t nIC, cell_asic *ic, bool fdrf)
+{
+	if(fdrf) ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]|0x40;
+	else ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]&0xBF;
+}
+
+/* Helper function to set the DTMEN bit */
+void LTC6813_set_cfgrb_dtmen(uint8_t nIC, cell_asic *ic, bool dtmen)
+{
+	if(dtmen) ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]|0x08;
+	else ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]&0xF7;
+}
+
+/* Helper function to set the PATH SELECT bit */
+void LTC6813_set_cfgrb_ps(uint8_t nIC, cell_asic *ic, bool ps[])
+{
+	for(int i =0;i<2;i++)
+	{
+	  if(ps[i])ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]|(0x01<<(i+4));
+	  else ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]&(~(0x01<<(i+4)));
+	}
+}
+
+/*  Helper function to set the gpio bits in configb b register  */
+void LTC6813_set_cfgrb_gpio_b(uint8_t nIC, cell_asic *ic, bool gpiobits[])
+{
+	for(int i =0;i<4;i++)
+	{
+	  if(gpiobits[i])ic[nIC].configb.tx_data[0] = ic[nIC].configb.tx_data[0]|(0x01<<i);
+	  else ic[nIC].configb.tx_data[0] = ic[nIC].configb.tx_data[0]&(~(0x01<<i));
+	}
+}
+
+/*  Helper function to set the dcc bits in configb b register */
+void LTC6813_set_cfgrb_dcc_b(uint8_t nIC, cell_asic *ic, bool dccbits[])
+{
+	for(int i =0;i<7;i++)
+	{
+		if(i==0)
+		{
+			if(dccbits[i])ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]|0x04;
+			else ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]&0xFB;
+		}
+		if(i>0 && i<5)
+		{
+			if(dccbits[i])ic[nIC].configb.tx_data[0] = ic[nIC].configb.tx_data[0]|(0x01<<(i+3));
+			else ic[nIC].configb.tx_data[0] = ic[nIC].configb.tx_data[0]&(~(0x01<<(i+3)));
+		}
+		if(i>4 && i<7)
+		{
+			if(dccbits[i])ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]|(0x01<<(i-5));
+			else ic[nIC].configb.tx_data[1] = ic[nIC].configb.tx_data[1]&(~(0x01<<(i-5)));
+		}
+	}
+}
+
+/* Write the LTC681x CFGRA */
+void LTC681x_wrcfg(uint8_t total_ic, //The number of ICs being written to
+                   cell_asic ic[]  // A two dimensional array of the configuration data that will be written
+                  )
+{
+	uint8_t cmd[2] = {0x00 , 0x01} ;
+	uint8_t write_buffer[256];
+	uint8_t write_count = 0;
+	uint8_t c_ic = 0;
+
+	for (uint8_t current_ic = 0; current_ic<total_ic; current_ic++)
+	{
+		if (ic->isospi_reverse == false)
+		{
+			c_ic = current_ic;
+		}
+		else
+		{
+			c_ic = total_ic - current_ic - 1;
+		}
+
+		for (uint8_t data = 0; data<6; data++)
+		{
+			write_buffer[write_count] = ic[c_ic].config.tx_data[data];
+			write_count++;
+		}
+	}
+	write_68(total_ic, cmd, write_buffer);
+}
+
+/* Write the LTC681x CFGRB */
+void LTC681x_wrcfgb(uint8_t total_ic, //The number of ICs being written to
+                    cell_asic ic[] // A two dimensional array of the configuration data that will be written
+                   )
+{
+	uint8_t cmd[2] = {0x00 , 0x24} ;
+	uint8_t write_buffer[256];
+	uint8_t write_count = 0;
+	uint8_t c_ic = 0;
+
+	for (uint8_t current_ic = 0; current_ic<total_ic; current_ic++)
+	{
+		if (ic->isospi_reverse == false)
+		{
+			c_ic = current_ic;
+		}
+		else
+		{
+			c_ic = total_ic - current_ic - 1;
+		}
+
+		for (uint8_t data = 0; data<6; data++)
+		{
+			write_buffer[write_count] = ic[c_ic].configb.tx_data[data];
+			write_count++;
+		}
+	}
+	write_68(total_ic, cmd, write_buffer);
+}
+
+
+/* Helper function that increments PEC counters */
+void LTC681x_check_pec(uint8_t total_ic, //Number of ICs in the system
+					   uint8_t reg, //Type of Register
+					   cell_asic *ic //A two dimensional array that stores the data
+					   )
+{
+	switch (reg)
+	{
+		case CFGR:
+		  for (int current_ic = 0 ; current_ic < total_ic; current_ic++)
+		  {
+			ic[current_ic].crc_count.pec_count = ic[current_ic].crc_count.pec_count + ic[current_ic].config.rx_pec_match;
+			ic[current_ic].crc_count.cfgr_pec = ic[current_ic].crc_count.cfgr_pec + ic[current_ic].config.rx_pec_match;
+		  }
+		break;
+
+		case CFGRB:
+		  for (int current_ic = 0 ; current_ic < total_ic; current_ic++)
+		  {
+			ic[current_ic].crc_count.pec_count = ic[current_ic].crc_count.pec_count + ic[current_ic].configb.rx_pec_match;
+			ic[current_ic].crc_count.cfgr_pec = ic[current_ic].crc_count.cfgr_pec + ic[current_ic].configb.rx_pec_match;
+		  }
+		break;
+		case CELL:
+		  for (int current_ic = 0 ; current_ic < total_ic; current_ic++)
+		  {
+			for (int i=0; i<ic[0].ic_reg.num_cv_reg; i++)
+			{
+			  ic[current_ic].crc_count.pec_count = ic[current_ic].crc_count.pec_count + ic[current_ic].cells.pec_match[i];
+			  ic[current_ic].crc_count.cell_pec[i] = ic[current_ic].crc_count.cell_pec[i] + ic[current_ic].cells.pec_match[i];
+			}
+		  }
+		break;
+		case AUX:
+		  for (int current_ic = 0 ; current_ic < total_ic; current_ic++)
+		  {
+			for (int i=0; i<ic[0].ic_reg.num_gpio_reg; i++)
+			{
+			  ic[current_ic].crc_count.pec_count = ic[current_ic].crc_count.pec_count + (ic[current_ic].aux.pec_match[i]);
+			  ic[current_ic].crc_count.aux_pec[i] = ic[current_ic].crc_count.aux_pec[i] + (ic[current_ic].aux.pec_match[i]);
+			}
+		  }
+
+		break;
+		case STAT:
+		  for (int current_ic = 0 ; current_ic < total_ic; current_ic++)
+		  {
+
+			for (int i=0; i<ic[0].ic_reg.num_stat_reg-1; i++)
+			{
+			  ic[current_ic].crc_count.pec_count = ic[current_ic].crc_count.pec_count + ic[current_ic].stat.pec_match[i];
+			  ic[current_ic].crc_count.stat_pec[i] = ic[current_ic].crc_count.stat_pec[i] + ic[current_ic].stat.pec_match[i];
+			}
+		  }
+		break;
+		default:
+		break;
+	}
+}
+
+/* Read the LTC681x CFGA */
+int8_t LTC681x_rdcfg(uint8_t total_ic, //Number of ICs in the system
+                     cell_asic ic[] // A two dimensional array that the function stores the read configuration data.
+                    )
+{
+	uint8_t cmd[2]= {0x00 , 0x02};
+	uint8_t read_buffer[256];
+	int8_t pec_error = 0;
+	uint16_t data_pec;
+	uint16_t calc_pec;
+	uint8_t c_ic = 0;
+
+	pec_error = read_68(total_ic, cmd, read_buffer);
+
+	for (uint8_t current_ic = 0; current_ic<total_ic; current_ic++)
+	{
+		if (ic->isospi_reverse == false)
+		{
+			c_ic = current_ic;
+		}
+		else
+		{
+			c_ic = total_ic - current_ic - 1;
+		}
+
+		for (int byte=0; byte<8; byte++)
+		{
+			ic[c_ic].config.rx_data[byte] = read_buffer[byte+(8*current_ic)];
+		}
+
+		calc_pec = driverSWLTC6804CalcPEC15(6,&read_buffer[8*current_ic]);
+		data_pec = read_buffer[7+(8*current_ic)] | (read_buffer[6+(8*current_ic)]<<8);
+		if (calc_pec != data_pec )
+		{
+			ic[c_ic].config.rx_pec_match = 1;
+		}
+		else ic[c_ic].config.rx_pec_match = 0;
+	}
+	LTC681x_check_pec(total_ic,CFGR,ic);
+
+	return(pec_error);
+}
+
+/* Reads the LTC681x CFGB */
+int8_t LTC681x_rdcfgb(uint8_t total_ic, //Number of ICs in the system
+                      cell_asic ic[] // A two dimensional array that the function stores the read configuration data.
+                     )
+{
+	uint8_t cmd[2]= {0x00 , 0x26};
+	uint8_t read_buffer[256];
+	int8_t pec_error = 0;
+	uint16_t data_pec;
+	uint16_t calc_pec;
+	uint8_t c_ic = 0;
+
+	pec_error = read_68(total_ic, cmd, read_buffer);
+
+	for (uint8_t current_ic = 0; current_ic<total_ic; current_ic++)
+	{
+		if (ic->isospi_reverse == false)
+		{
+			c_ic = current_ic;
+		}
+		else
+		{
+			c_ic = total_ic - current_ic - 1;
+		}
+
+		for (int byte=0; byte<8; byte++)
+		{
+			ic[c_ic].configb.rx_data[byte] = read_buffer[byte+(8*current_ic)];
+		}
+
+		calc_pec = driverSWLTC6804CalcPEC15(6,&read_buffer[8*current_ic]);
+		data_pec = read_buffer[7+(8*current_ic)] | (read_buffer[6+(8*current_ic)]<<8);
+		if (calc_pec != data_pec )
+		{
+			ic[c_ic].configb.rx_pec_match = 1;
+		}
+		else ic[c_ic].configb.rx_pec_match = 0;
+	}
+	LTC681x_check_pec(total_ic,CFGRB,ic);
+
+	return(pec_error);
+}

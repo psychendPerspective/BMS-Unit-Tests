@@ -65,6 +65,32 @@ static void MX_RTC_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 
+int bufsize(char *buf);
+void clear_buffer(void);
+void send_uart (char *string); //debug print statements function prototype
+void sd_init(void); //init and mount SD card, create files and headers
+void write_to_csvfile (void); //function to log to csv file on SD card
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan); //Set CAN RX interrupt handler
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart); //set UART interrupt handler
+void set_time(void); //RTC related set initial time and date
+void get_time(void); //RTC related get real time data
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin); //function for Charger Detect Interrupt
+void wakeup_idle(uint8_t total_ic); //Generic function to wake up serial interface of AFE from idle state(LTC681x)
+void wakeup_sleep(uint8_t total_ic); //Generic function to wake up serial interface of AFE from sleep state (LTC681x)
+void CellMonitorsArrayTranslate(void);
+void AuxMonitorsArrayTranslate(void);
+void calculateMaxandMinCellVoltages(void);
+void cellBalancingTask(void);
+void cellBalancingUnitTest(void);
+void init_cell_asic_structure(uint8_t total_ic, cell_asic *ic);
+void init_LTC6813(void);
+void unit_test_LTC6813(void);
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
 /*File system declerations */
 FATFS fs;  // file system
 FIL fil; // File
@@ -72,10 +98,6 @@ FILINFO fno;
 FRESULT fresult;  // result
 UINT br, bw;  // File read/write count
 
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
 
 uint8_t dummy_timer, dummy_cell_votlages, dummy_pack_voltage;
 float dummy_pack_current, dummy_temperature;
@@ -123,7 +145,9 @@ int CAN_data_checkFlag = 0;
 #define noOfParallelModules 1
 #define noOfCellsPerModule 18
 
-bool cellBalancingEnable = true;
+#define ext_LTC681x_lib 1
+
+bool cellBalancingEnable = false;
 
 uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
@@ -134,6 +158,7 @@ uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
 uint32_t CellBalanceUpdateLastTick;
 cellMonitorCellsTypeDef cellVoltagesIndividual[noOfTotalCells]; //18:Total no of cells possible
 auxMonitorTypeDef auxVoltagesIndividual[9];
+cell_asic BMS_IC[cellMonitorICCount];
 float packVoltage, packCurrent, cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage;
 
 
@@ -571,6 +596,222 @@ void cellBalancingTask(void)
 	driverSWLTC6804EnableBalanceResistorsArray(cellModuleBalanceResistorEnableMask, CELL_MON_LTC6811_1);
 }
 
+
+
+void init_cell_asic_structure(uint8_t total_ic, cell_asic *ic)
+{
+	/*************************************************************************
+	 Set configuration register. Refer to the data sheet
+	**************************************************************************/
+	bool REFON = true; //!< Reference Powered Up Bit
+	bool ADCOPT = false; //!< ADC Mode option bit
+	bool GPIOBITS_A[5] = {false,false,true,true,true}; //!< GPIO Pin Control // Gpio 1,2,3,4,5
+	bool GPIOBITS_B[4] = {false,false,false,false}; //!< GPIO Pin Control // Gpio 6,7,8,9
+	uint16_t UV= 42000; //!< Under voltage Comparison Voltage
+	uint16_t OV= 28000; //!< Over voltage Comparison Voltage
+	bool DCCBITS_A[12] = {false,false,false,false,false,false,false,false,false,false,false,false}; //!< Discharge cell switch //Dcc 1,2,3,4,5,6,7,8,9,10,11,12
+	bool DCCBITS_B[7]= {false,false,false,false,false,false,false}; //!< Discharge cell switch //Dcc 0,13,14,15
+	bool DCTOBITS[4] = {true,false,true,false}; //!< Discharge time value //Dcto 0,1,2,3  // Programed for 4 min
+	/*Ensure that Dcto bits are set according to the required discharge time. Refer to the data sheet */
+	bool FDRF = false; //!< Force Digital Redundancy Failure Bit
+	bool DTMEN = true; //!< Enable Discharge Timer Monitor
+	bool PSBITS[2]= {false,false}; //!< Digital Redundancy Path Selection//ps-0,1
+
+	for (uint8_t current_ic = 0; current_ic<total_ic;current_ic++)
+	{
+		for (int j =0; j<6; j++)
+		{
+		  ic[current_ic].config.tx_data[j] = 0;
+		  ic[current_ic].configb.tx_data[j] = 0;
+		}
+
+		LTC6813_set_cfgr(current_ic,BMS_IC,REFON,ADCOPT,GPIOBITS_A,DCCBITS_A, DCTOBITS, UV, OV);
+		LTC6813_set_cfgrb(current_ic,BMS_IC,FDRF,DTMEN,PSBITS,GPIOBITS_B,DCCBITS_B);
+
+
+		ic[current_ic].crc_count.pec_count = 0;
+		ic[current_ic].crc_count.cfgr_pec = 0;
+		for (int i=0; i<6; i++)
+		{
+			ic[current_ic].crc_count.cell_pec[i]=0;
+
+		}
+		for (int i=0; i<4; i++)
+		{
+			ic[current_ic].crc_count.aux_pec[i]=0;
+		}
+		for (int i=0; i<2; i++)
+		{
+			ic[current_ic].crc_count.stat_pec[i]=0;
+		}
+
+        ic[current_ic].ic_reg.cell_channels=18;
+        ic[current_ic].ic_reg.stat_channels=4;
+        ic[current_ic].ic_reg.aux_channels=9;
+        ic[current_ic].ic_reg.num_cv_reg=6;
+        ic[current_ic].ic_reg.num_gpio_reg=4;
+        ic[current_ic].ic_reg.num_stat_reg=2;
+	}
+
+}
+
+
+void cellBalancingUnitTest(void)
+{
+	if(cellBalancingEnable)
+	{
+		driverSWLTC6804WakeIC();
+	    LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+
+	    //Enable S1, S7 and S13 and measure C1, C7 and C13 with DCP enabled
+		for(uint8_t S_pin = 1 ; S_pin < noOfTotalCells+1; S_pin += 6)
+		{
+			LTC6813_set_discharge(S_pin,cellMonitorICCount,BMS_IC);
+		}
+		LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+		LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+		driverSWLTC6804ResetCellVoltageRegisters();
+		driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
+		if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
+		{
+			CellMonitorsArrayTranslate();
+			sprintf(buffer,"Enabled S1, S7 and S13; C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
+					cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+					cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17]);
+			send_uart(buffer);
+			clear_buffer();
+		}
+		LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+
+	    //Enable S2, S8 and S14 and measure C2, C8 and C14 with DCP enabled
+		for(uint8_t S_pin = 2 ; S_pin < noOfTotalCells+1; S_pin += 6)
+		{
+			LTC6813_set_discharge(S_pin,cellMonitorICCount,BMS_IC);
+		}
+		LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+		LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+		driverSWLTC6804ResetCellVoltageRegisters();
+		driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
+		if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
+		{
+			CellMonitorsArrayTranslate();
+			sprintf(buffer,"Enabled S2, S8 and S14; C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
+					cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+					cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17]);
+			send_uart(buffer);
+			clear_buffer();
+		}
+		LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+
+	    //Enable S3, S9 and S15 and measure C3, C9 and C15 with DCP enabled
+		for(uint8_t S_pin = 3 ; S_pin < noOfTotalCells+1; S_pin += 6)
+		{
+			LTC6813_set_discharge(S_pin,cellMonitorICCount,BMS_IC);
+		}
+		LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+		LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+		driverSWLTC6804ResetCellVoltageRegisters();
+		driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
+		if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
+		{
+			CellMonitorsArrayTranslate();
+			sprintf(buffer,"Enabled S3, S9 and S15; C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
+					cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+					cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17]);
+			send_uart(buffer);
+			clear_buffer();
+		}
+		LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+
+
+	    //Enable S4, S10 and S16 and measure C4, C10 and C16 with DCP enabled
+		for(uint8_t S_pin = 4 ; S_pin < noOfTotalCells+1; S_pin += 6)
+		{
+			LTC6813_set_discharge(S_pin,cellMonitorICCount,BMS_IC);
+		}
+		LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+		LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+		driverSWLTC6804ResetCellVoltageRegisters();
+		driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
+		if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
+		{
+			CellMonitorsArrayTranslate();
+			sprintf(buffer,"Enabled S4, S10 and S16; C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
+					cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+					cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17]);
+			send_uart(buffer);
+			clear_buffer();
+		}
+		LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+
+
+	    //Enable S5, S11 and S17 and measure C5, C11 and C17 with DCP enabled
+		for(uint8_t S_pin = 5 ; S_pin < noOfTotalCells+1; S_pin += 6)
+		{
+			LTC6813_set_discharge(S_pin,cellMonitorICCount,BMS_IC);
+		}
+		LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+		LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+		driverSWLTC6804ResetCellVoltageRegisters();
+		driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
+		if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
+		{
+			CellMonitorsArrayTranslate();
+			sprintf(buffer,"Enabled S5, S11 and S17; C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
+						cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+						cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+						cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17]);
+			send_uart(buffer);
+			clear_buffer();
+		}
+		LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+
+	    //Enable S6, S12 and S18 and measure C6, C12 and C18 with DCP enabled
+		for(uint8_t S_pin = 6 ; S_pin < noOfTotalCells+1; S_pin += 6)
+		{
+			LTC6813_set_discharge(S_pin,cellMonitorICCount,BMS_IC);
+		}
+		LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+		LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+		driverSWLTC6804ResetCellVoltageRegisters();
+		driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
+		if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
+		{
+			CellMonitorsArrayTranslate();
+			sprintf(buffer,"Enabled S6, S12 and S18; C1:%f,C2:%f,C3:%f,C4:%f,C5:%f,C6:%f,C7:%f,C8:%f,C9:%f,C10:%f,C11:%f,C12:%f,C13:%f,C14:%f,C15:%f,C16:%f,C17:%f,C18:%f,\r\n",
+						cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
+						cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
+						cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17]);
+			send_uart(buffer);
+			clear_buffer();
+		}
+		LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	    LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+	}
+	else
+	{
+	      LTC681x_clear_discharge(cellMonitorICCount,BMS_IC);
+	      LTC681x_wrcfg(cellMonitorICCount,BMS_IC);
+	      LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
+	}
+}
 void init_LTC6813(void)
 {
 	driverLTC6804ConfigStructTypedef configStruct;
@@ -727,9 +968,11 @@ int main(void)
   HAL_Delay(250);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, SET); //turn ON HV+ contactor
 
-  	//TO DO:add LTC6811 library files/use driverSWLTC6804 functions
   //wakeup_sleep(1);
   //wakeup_idle(1);
+#ifdef ext_LTC681x_lib
+  init_cell_asic_structure(cellMonitorICCount, BMS_IC);
+#endif
   init_LTC6813();
   /* USER CODE END 2 */
 
@@ -737,7 +980,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  //HAL_UART_Receive (&huart2, Rx_data, 4, 1000);
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3); //toggle status LED
 	  HAL_Delay(250);
 	  //send CAN message // TO DO:check CAN message reception on BluePill
@@ -746,7 +988,11 @@ int main(void)
 	  //wakeup_idle(1);
 	  unit_test_LTC6813();
 	  calculateMaxandMinCellVoltages();
-	  cellBalancingTask();
+
+	  //cellBalancingTask();
+#ifdef ext_LTC681x_lib
+	  cellBalancingUnitTest();
+#endif
 
 	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback
 	  {
