@@ -868,7 +868,7 @@ void unit_test_LTC6813(void)
 	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804ResetAuxRegisters();
 	driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
-
+	HAL_Delay(250);
 	if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
 	{
 		CellMonitorsArrayTranslate();
@@ -897,6 +897,7 @@ void unit_test_LTC6813(void)
 
 	driverSWLTC6804ResetAuxRegisters();
 	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
+	HAL_Delay(250);
 
 	if(driverSWLTC6804ReadAuxVoltagesArray(auxModuleVoltages,NTCnominalResistance, NTCseriesResistor, NTCbetaFactor, 25.0f))
 	{
