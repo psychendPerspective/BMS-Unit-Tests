@@ -145,21 +145,23 @@ int CAN_data_checkFlag = 0;
 #define noOfParallelModules 1
 #define noOfCellsPerModule 18
 
-#define ext_LTC681x_lib 1
+#define ext_LTC681x_lib 0
 
-bool cellBalancingEnable = false;
+bool cellBalancingEnable = true;
 
 uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
 float cellModuleVoltages[1][noOfTotalCells];
 float auxModuleVoltages[1][9];
+float packCurrentVoltage[1][12];
 uint32_t cellModuleBalanceResistorEnableMask[NoOfCellMonitorsPossibleOnBMS];
 uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
 uint32_t CellBalanceUpdateLastTick;
 cellMonitorCellsTypeDef cellVoltagesIndividual[noOfTotalCells]; //18:Total no of cells possible
 auxMonitorTypeDef auxVoltagesIndividual[9];
 cell_asic BMS_IC[cellMonitorICCount];
-float packVoltage, packCurrent, cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage;
+float packVoltage, cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage;
+int32_t packCurrent;
 
 
 /*******************************************************************************/
@@ -187,17 +189,16 @@ void write_to_csvfile (void)
 		  //dummy_timer += 1;
 		  //dummy_cell_votlages += 1;
 		  //dummy_pack_voltage += 11;
-
-		  dummy_pack_current += 0.1;
+		  //dummy_pack_current += 0.1;
 		  //dummy_temperature += 1.0;
 
 		  fresult = f_open(&fil, "file3.csv", FA_OPEN_EXISTING | FA_READ | FA_WRITE);
 		  /* Move to offset to the end of the file */
 		  fresult = f_lseek(&fil, f_size(&fil));
-		  sprintf(buffer, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f \r\n",
+		  sprintf(buffer, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%ld,%.3f,%.3f,%.3f,%.3f \r\n",
 				  	(HAL_GetTick()/ 1000.0),cellModuleVoltages[0][0],cellModuleVoltages[0][1],cellModuleVoltages[0][2],cellModuleVoltages[0][3],cellModuleVoltages[0][4],cellModuleVoltages[0][5],cellModuleVoltages[0][6],
 					cellModuleVoltages[0][7],cellModuleVoltages[0][8],cellModuleVoltages[0][9],cellModuleVoltages[0][10],cellModuleVoltages[0][11],cellModuleVoltages[0][12],
-					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17], packVoltage, dummy_pack_current,auxVoltagesIndividual[4].auxVoltage, auxVoltagesIndividual[5].auxVoltage, cellVoltageHigh, cellVoltageLow );
+					cellModuleVoltages[0][13],cellModuleVoltages[0][14],cellModuleVoltages[0][15],cellModuleVoltages[0][16],cellModuleVoltages[0][17], packVoltage, packCurrent ,auxVoltagesIndividual[4].auxVoltage, auxVoltagesIndividual[5].auxVoltage, cellVoltageHigh, cellVoltageLow );
 		  fresult = f_write(&fil, buffer, bufsize(buffer), &bw);
 		  //send_uart(buffer);
 		  f_close (&fil);
@@ -849,9 +850,10 @@ void init_LTC6813(void)
 	}
 
 	driverSWLTC6804ResetCellVoltageRegisters();
-	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
 	driverSWLTC6804ResetAuxRegisters();
+	driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
 	//driverSWLTC6804StartLoadedCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL,true);
 	//driverSWLTC6804ResetAuxRegisters();
@@ -863,6 +865,10 @@ void unit_test_LTC6813(void)
 
 	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 	//HAL_Delay(300);
+	driverSWLTC6804ResetCellVoltageRegisters();
+	driverSWLTC6804ResetAuxRegisters();
+	driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
+
 	if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
 	{
 		CellMonitorsArrayTranslate();
@@ -877,6 +883,21 @@ void unit_test_LTC6813(void)
 				cellModuleVoltages[0][13] + cellModuleVoltages[0][14] + cellModuleVoltages[0][15] + cellModuleVoltages[0][16] + cellModuleVoltages[0][17] ;
 	}
 
+	if(driverSWLTC6804ReadPackCurrent(packCurrentVoltage))
+	{
+		sprintf(buffer, "Pack Current ADC voltage : %f\r\n", packCurrentVoltage[0][0]);
+		send_uart(buffer);
+		clear_buffer();
+		packCurrent = (packCurrentVoltage[0][0]*1000.0f - 2.5*1000.0f)/6.25; //Vout = Vref +/- (1.25xIp / Ipn)
+																//Ip -> packCurrent , Vref = 2.5V
+		sprintf(buffer, "Pack Current is : %ld\r\n", packCurrent); //TO DO: moving average filter, zero current calibration
+		send_uart(buffer);
+		clear_buffer();
+	}
+
+	driverSWLTC6804ResetAuxRegisters();
+	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
+
 	if(driverSWLTC6804ReadAuxVoltagesArray(auxModuleVoltages,NTCnominalResistance, NTCseriesResistor, NTCbetaFactor, 25.0f))
 	{
 		AuxMonitorsArrayTranslate();
@@ -888,11 +909,10 @@ void unit_test_LTC6813(void)
 				clear_buffer();
 	}
 
-	driverSWLTC6804ResetCellVoltageRegisters();
-	driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
+	//driverSWLTC6804ResetCellVoltageRegisters();
+	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
-	driverSWLTC6804ResetAuxRegisters();
-	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
+	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 }
 /*******************************************************************************/
 /* USER CODE END 0 */
@@ -971,7 +991,7 @@ int main(void)
   //wakeup_sleep(1);
   //wakeup_idle(1);
 #ifdef ext_LTC681x_lib
-  init_cell_asic_structure(cellMonitorICCount, BMS_IC);
+  //init_cell_asic_structure(cellMonitorICCount, BMS_IC);
 #endif
   init_LTC6813();
   /* USER CODE END 2 */
@@ -991,7 +1011,7 @@ int main(void)
 
 	  //cellBalancingTask();
 #ifdef ext_LTC681x_lib
-	  cellBalancingUnitTest();
+	  //cellBalancingUnitTest();
 #endif
 
 	  if(CAN_data_checkFlag) //check if CAN RX flag is set in HAL_CAN_RxFifo0MsgPendingCallback

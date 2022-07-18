@@ -1308,3 +1308,23 @@ int8_t LTC681x_rdcfgb(uint8_t total_ic, //Number of ICs in the system
 
 	return(pec_error);
 }
+
+
+bool driverSWLTC6804ReadPackCurrent(float auxVoltagesArray[][12])
+{
+	bool dataValid = false;
+	uint16_t auxVoltageArrayCodes[driverSWLTC6804TotalNumberOfICs][12];
+
+	driverSWLTC6804ReadAuxVoltageRegisters(AUX_CH_GPIO1,driverSWLTC6804TotalNumberOfICs,auxVoltageArrayCodes);
+
+	for(uint8_t modulePointer = 0; modulePointer < driverSWLTC6804TotalNumberOfICs; modulePointer++)
+	{
+			if(auxVoltageArrayCodes[modulePointer][0]*0.0001f < 10.0f)
+			{
+				auxVoltagesArray[modulePointer][0] = auxVoltageArrayCodes[modulePointer][0]*0.0001f;
+				dataValid = true;
+			}
+	}
+
+	return dataValid;
+}

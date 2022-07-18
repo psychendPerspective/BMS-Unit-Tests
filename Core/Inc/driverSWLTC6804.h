@@ -318,6 +318,7 @@ float    driverSWLTC6804ConvertTemperatureExt(uint16_t inputValue,uint32_t ntcNo
 bool     driverSWLTC6804ReadAuxVoltagesArray(float auxVoltagesArray[][9],uint32_t ntcNominal,uint32_t ntcSeriesResistance, uint16_t ntcBetaFactor,float ntcNominalTemp);
 int8_t   driverSWLTC6804ReadAuxVoltageRegisters(uint8_t reg, uint8_t total_ic, uint16_t aux_codes[][12]);
 void     driverSWLTC6804ReadAuxGroups(uint8_t reg, uint8_t total_ic,uint8_t *data);
+bool driverSWLTC6804ReadPackCurrent(float auxVoltagesArray[][12]);
 
 //Status & flags
 bool     driverSWLTC6804ReadVoltageFlags(uint32_t *underVoltageFlags, uint32_t *overVoltageFlags, uint32_t lastICMask, uint8_t noOfParallelModules, uint32_t dieTemperature[]);
