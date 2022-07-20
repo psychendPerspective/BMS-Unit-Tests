@@ -1310,21 +1310,21 @@ int8_t LTC681x_rdcfgb(uint8_t total_ic, //Number of ICs in the system
 }
 
 
-bool driverSWLTC6804ReadPackCurrent(float auxVoltagesArray[][12])
+bool driverSWLTC6804ReadPackCurrent(float auxVoltagesArray[][driverSWLTC6804MaxNoOfTempSensorPerModule])
 {
-	bool dataValid = false;
-	uint16_t auxVoltageArrayCodes[driverSWLTC6804TotalNumberOfICs][12];
+	bool dataValid = true;
+	uint16_t auxVoltageArrayCodes[driverSWLTC6804TotalNumberOfICs][driverSWLTC6804MaxNoOfTempSensorPerModule];
 
 	driverSWLTC6804ReadAuxVoltageRegisters(AUX_CH_GPIO1,driverSWLTC6804TotalNumberOfICs,auxVoltageArrayCodes);
 
-	for(uint8_t modulePointer = 0; modulePointer < driverSWLTC6804TotalNumberOfICs; modulePointer++)
-	{
-			if(auxVoltageArrayCodes[modulePointer][0]*0.0001f < 10.0f)
-			{
-				auxVoltagesArray[modulePointer][0] = auxVoltageArrayCodes[modulePointer][0]*0.0001f;
-				dataValid = true;
-			}
-	}
+  for(uint8_t modulePointer = 0; modulePointer < driverSWLTC6804TotalNumberOfICs; modulePointer++) {
+		for(uint8_t auxPointer = 0; auxPointer < driverSWLTC6804MaxNoOfTempSensorPerModule; auxPointer++){
+			if(auxVoltageArrayCodes[modulePointer][auxPointer]*0.0001f < 10.0f)
+			  auxVoltagesArray[modulePointer][auxPointer] = auxVoltageArrayCodes[modulePointer][auxPointer] * 0.0001f;
+			else
+				dataValid = false;
+		}
+  }
 
 	return dataValid;
 }

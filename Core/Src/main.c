@@ -888,9 +888,9 @@ void unit_test_LTC6813(void)
 		sprintf(buffer, "Pack Current ADC voltage : %f\r\n", packCurrentVoltage[0][0]);
 		send_uart(buffer);
 		clear_buffer();
-		packCurrent = (packCurrentVoltage[0][0]*1000.0f - 2.5*1000.0f)/6.25; //Vout = Vref +/- (1.25xIp / Ipn)
+		packCurrent = (packCurrentVoltage[0][0] - 2.5)/0.00625; //Vout = Vref +/- (1.25xIp / Ipn)
 																//Ip -> packCurrent , Vref = 2.5V
-		sprintf(buffer, "Pack Current is : %ld\r\n", packCurrent); //TO DO: moving average filter, zero current calibration
+		sprintf(buffer, "Pack Current is : %ld (A)\r\n", packCurrent); //TO DO: moving average filter, zero current calibration
 		send_uart(buffer);
 		clear_buffer();
 	}
@@ -914,6 +914,9 @@ void unit_test_LTC6813(void)
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
 	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
+//	driverSWLTC6804ResetCellVoltageRegisters();
+//	driverSWLTC6804ResetAuxRegisters();
+//	driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 }
 /*******************************************************************************/
 /* USER CODE END 0 */
