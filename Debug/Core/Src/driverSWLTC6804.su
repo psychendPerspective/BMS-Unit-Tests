@@ -52,3 +52,4 @@ driverSWLTC6804.c:1167:6:LTC681x_check_pec	48	static
 driverSWLTC6804.c:1227:8:LTC681x_rdcfg	288	static
 driverSWLTC6804.c:1270:8:LTC681x_rdcfgb	288	static
 driverSWLTC6804.c:1313:6:driverSWLTC6804ReadPackCurrent	64	dynamic
+driverSWLTC6804.c:1332:6:driverSWLTC6804ReadVREFvoltage	64	dynamic

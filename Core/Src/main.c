@@ -85,6 +85,7 @@ void cellBalancingUnitTest(void);
 void init_cell_asic_structure(uint8_t total_ic, cell_asic *ic);
 void init_LTC6813(void);
 void unit_test_LTC6813(void);
+void zeroCurrentCalibration(void);
 
 /* USER CODE END PFP */
 
@@ -146,6 +147,7 @@ int CAN_data_checkFlag = 0;
 #define noOfCellsPerModule 18
 
 #define ext_LTC681x_lib 0
+#define zeroCurrentCalibrationTime 50
 
 bool cellBalancingEnable = true;
 
@@ -153,7 +155,10 @@ uint8_t SPI1_pTxData[8];
 uint8_t SPI1_pRxData[8];
 float cellModuleVoltages[1][noOfTotalCells];
 float auxModuleVoltages[1][9];
-float packCurrentVoltage[1][12];
+float packCurrentVoltage[1][12]; //ADC voltage value for GPIO1
+float packCurrentVREF[1][12]; //ADC voltage value for GPIO2
+float zeroCurrentVoltage[1][12]; //zero current ADC voltage value for GPIO1
+float zeroCurrentVREF[1][12]; //zero current ADC voltage value for GPIO2
 uint32_t cellModuleBalanceResistorEnableMask[NoOfCellMonitorsPossibleOnBMS];
 uint32_t cellModuleBalanceResistorEnableMaskTest[NoOfCellMonitorsPossibleOnBMS];
 uint32_t CellBalanceUpdateLastTick;
@@ -161,7 +166,7 @@ cellMonitorCellsTypeDef cellVoltagesIndividual[noOfTotalCells]; //18:Total no of
 auxMonitorTypeDef auxVoltagesIndividual[9];
 cell_asic BMS_IC[cellMonitorICCount];
 float packVoltage, cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage;
-int32_t packCurrent;
+int32_t packCurrent, currentOffset;
 
 
 /*******************************************************************************/
@@ -813,6 +818,35 @@ void cellBalancingUnitTest(void)
 	      LTC681x_wrcfgb(cellMonitorICCount,BMS_IC);
 	}
 }
+
+void zeroCurrentCalibration(void)
+{
+	driverSWLTC6804ReadPackCurrent(zeroCurrentVoltage);
+	driverSWLTC6804ReadVREFvoltage(zeroCurrentVREF);
+	if(driverSWLTC6804ReadPackCurrent(zeroCurrentVoltage) && driverSWLTC6804ReadVREFvoltage(zeroCurrentVREF))
+	{
+		for(int i = 0; i <zeroCurrentCalibrationTime; i++)
+		{
+			currentOffset = ((zeroCurrentVoltage[0][0]*1000.0f) - (zeroCurrentVREF[0][1]*1000.0f))/0.00625; //mA
+			driverSWLTC6804ResetAuxRegisters();
+			driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
+			sprintf(buffer, "Zero Current calibration in progress, Zero Current(mA) = %ld \r\n", currentOffset);
+			send_uart(buffer);
+			clear_buffer();
+			HAL_Delay(100);
+			driverSWLTC6804ReadPackCurrent(zeroCurrentVoltage);
+			driverSWLTC6804ReadVREFvoltage(zeroCurrentVREF);
+			if((-300 < currentOffset) && (currentOffset < 300))
+			{
+				sprintf(buffer, "Current Offset(mA) : %ld \r\n", currentOffset);
+				send_uart(buffer);
+				clear_buffer();
+				break;
+			}
+		}
+	}
+}
+
 void init_LTC6813(void)
 {
 	driverLTC6804ConfigStructTypedef configStruct;
@@ -849,17 +883,24 @@ void init_LTC6813(void)
 			auxModuleVoltages[modulePointer][auxPointer] = 0.0f;
 	}
 
-	driverSWLTC6804ResetCellVoltageRegisters();
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
+	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804ResetAuxRegisters();
 	driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
+	HAL_Delay(250);
+	zeroCurrentCalibration();
+	driverSWLTC6804ResetAuxRegisters();
 	driverSWLTC6804StartAuxVoltageConversion(MD_FILTERED, AUX_CH_ALL);
 	//driverSWLTC6804StartLoadedCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL,true);
 	//driverSWLTC6804ResetAuxRegisters();
 	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 
 }
+
+
+
+
 void unit_test_LTC6813(void)
 {
 
@@ -883,14 +924,15 @@ void unit_test_LTC6813(void)
 				cellModuleVoltages[0][13] + cellModuleVoltages[0][14] + cellModuleVoltages[0][15] + cellModuleVoltages[0][16] + cellModuleVoltages[0][17] ;
 	}
 
-	if(driverSWLTC6804ReadPackCurrent(packCurrentVoltage))
+	if(driverSWLTC6804ReadPackCurrent(packCurrentVoltage) && driverSWLTC6804ReadVREFvoltage(packCurrentVREF))
 	{
-		sprintf(buffer, "Pack Current ADC voltage : %f\r\n", packCurrentVoltage[0][0]);
+		sprintf(buffer, "Pack Current ADC voltage(V) : %f , Current VREF voltage(V) : %f \r\n", packCurrentVoltage[0][0], packCurrentVREF[0][1]);
 		send_uart(buffer);
 		clear_buffer();
-		packCurrent = (packCurrentVoltage[0][0] - 2.5)/0.00625; //Vout = Vref +/- (1.25xIp / Ipn)
+		packCurrent = ((packCurrentVoltage[0][0]*1000.0f) - (packCurrentVREF[0][1]*1000.0f))/0.00625; //Vout = Vref +/- (1.25xIp / Ipn)
 																//Ip -> packCurrent , Vref = 2.5V
-		sprintf(buffer, "Pack Current is : %ld (A)\r\n", packCurrent); //TO DO: moving average filter, zero current calibration
+		packCurrent = packCurrent - currentOffset;
+		sprintf(buffer, "Pack Current is : %ld (mA)\r\n", packCurrent); //TO DO: moving average filter
 		send_uart(buffer);
 		clear_buffer();
 	}
@@ -963,6 +1005,8 @@ int main(void)
   send_uart(buffer);
   clear_buffer();
 
+  init_LTC6813(); //init LTC6813 parameters, write config registers
+
   if(HAL_RTCEx_BKUPRead(&hrtc,RTC_BKP_DR1) != 0x32F2)
   	  {
 	  	  set_time(); //set RTC init value
@@ -997,7 +1041,6 @@ int main(void)
 #ifdef ext_LTC681x_lib
   //init_cell_asic_structure(cellMonitorICCount, BMS_IC);
 #endif
-  init_LTC6813();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -1012,8 +1055,9 @@ int main(void)
 	  //wakeup_idle(1);
 	  unit_test_LTC6813();
 	  calculateMaxandMinCellVoltages();
-
 	  //cellBalancingTask();
+
+
 #ifdef ext_LTC681x_lib
 	  //cellBalancingUnitTest();
 #endif

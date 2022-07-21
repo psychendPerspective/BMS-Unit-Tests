@@ -319,6 +319,7 @@ bool     driverSWLTC6804ReadAuxVoltagesArray(float auxVoltagesArray[][9],uint32_
 int8_t   driverSWLTC6804ReadAuxVoltageRegisters(uint8_t reg, uint8_t total_ic, uint16_t aux_codes[][12]);
 void     driverSWLTC6804ReadAuxGroups(uint8_t reg, uint8_t total_ic,uint8_t *data);
 bool driverSWLTC6804ReadPackCurrent(float auxVoltagesArray[][12]);
+bool driverSWLTC6804ReadVREFvoltage(float auxVoltageVREFArray[][12]);
 
 //Status & flags
 bool     driverSWLTC6804ReadVoltageFlags(uint32_t *underVoltageFlags, uint32_t *overVoltageFlags, uint32_t lastICMask, uint8_t noOfParallelModules, uint32_t dieTemperature[]);

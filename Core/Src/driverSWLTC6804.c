@@ -1328,3 +1328,22 @@ bool driverSWLTC6804ReadPackCurrent(float auxVoltagesArray[][driverSWLTC6804MaxN
 
 	return dataValid;
 }
+
+bool driverSWLTC6804ReadVREFvoltage(float auxVoltageVREFArray[][driverSWLTC6804MaxNoOfTempSensorPerModule])
+{
+	bool dataValid = true;
+	uint16_t auxVoltageVREFArrayCodes[driverSWLTC6804TotalNumberOfICs][driverSWLTC6804MaxNoOfTempSensorPerModule];
+
+	driverSWLTC6804ReadAuxVoltageRegisters(AUX_CH_GPIO2,driverSWLTC6804TotalNumberOfICs,auxVoltageVREFArrayCodes);
+
+  for(uint8_t modulePointer = 0; modulePointer < driverSWLTC6804TotalNumberOfICs; modulePointer++) {
+		for(uint8_t auxPointer = 0; auxPointer < driverSWLTC6804MaxNoOfTempSensorPerModule; auxPointer++){
+			if(auxVoltageVREFArrayCodes[modulePointer][auxPointer]*0.0001f < 10.0f)
+				auxVoltageVREFArray[modulePointer][auxPointer] = auxVoltageVREFArrayCodes[modulePointer][auxPointer] * 0.0001f;
+			else
+				dataValid = false;
+		}
+  }
+
+	return dataValid;
+}
