@@ -52,16 +52,19 @@ void driverSWLTC6804Init(driverLTC6804ConfigStructTypedef configStruct, uint8_t 
 	driverHWSPI1Init(GPIOA,GPIO_PIN_4);
 	driverSWLTC6804WakeIC();
 
-	while((LTCScanCount < 5) && (returnPEC == -1)){
+	while((LTCScanCount < 5) && (returnPEC == -1))
+	{
 	  returnPEC =	driverSWLTC6804ReadConfigRegister(driverSWLTC6804TotalNumberOfICs,rxConfig);
 		driverSWLTC6804WakeIC();
 		driverSWLTC6804WriteConfigRegister(driverSWLTC6804TotalNumberOfICs,0,false);
-		if(cellMonitorType==CELL_MON_LTC6812_1 || cellMonitorType == CELL_MON_LTC6813_1){
+		if(cellMonitorType==CELL_MON_LTC6812_1 || cellMonitorType == CELL_MON_LTC6813_1)
+		{
 			driverSWLTC6804WriteConfigRegisterB(driverSWLTC6804TotalNumberOfICs,0,false);
-	}
+		}
 		driverSWLTC6804WakeIC();
 		LTCScanCount++;
 	}
+
 }
 
 void driverSWLTC6804ResetCellVoltageRegisters(void) {
@@ -689,6 +692,41 @@ int8_t driverSWLTC6804ReadConfigRegister(uint8_t total_ic, uint8_t r_config[][8]
   return(pec_error);
 }
 
+int8_t driverSWLTC6804ReadConfigRegisterB(uint8_t total_ic, uint8_t r_config[][8]) {
+  const uint8_t BYTES_IN_REG = 8;
+
+  uint8_t cmd[4];
+  uint8_t *rx_data;
+  int8_t pec_error = 0;
+  uint16_t data_pec;
+  uint16_t received_pec;
+  uint16_t cmd_pec;
+
+  rx_data = (uint8_t *) malloc((8*total_ic)*sizeof(uint8_t));
+
+  cmd[0] = 0x00;
+  cmd[1] = 0x26;
+//  cmd[2] = 0x2C;
+//  cmd[3] = 0xC8;
+  cmd_pec = driverSWLTC6804CalcPEC15(2, cmd);
+  cmd[2] = (uint8_t)(cmd_pec >> 8);
+  cmd[3] = (uint8_t)(cmd_pec);
+
+  driverSWLTC6804WriteRead(cmd, 4, rx_data, (BYTES_IN_REG*total_ic));
+
+  for (uint8_t current_ic = 0; current_ic < total_ic; current_ic++) { 			//executes for each LTC6804 in the daisy chain and packs the data into the r_config array as well as check the received Config data for any bit errors
+    for (uint8_t current_byte = 0; current_byte < BYTES_IN_REG; current_byte++)	{
+      r_config[current_ic][current_byte] = rx_data[current_byte + (current_ic*BYTES_IN_REG)];
+    }
+    received_pec = (r_config[current_ic][6]<<8) + r_config[current_ic][7];
+    data_pec = driverSWLTC6804CalcPEC15(6, &r_config[current_ic][0]);
+    if(received_pec != data_pec) {
+      pec_error = -1;
+    }
+  }
+  free(rx_data);
+  return(pec_error);
+}
 // Coupling of drivers
 void driverSWLTC6804Write(uint8_t *writeBytes, uint8_t writeLength) {
 	driverHWSPI1Write(writeBytes,writeLength,GPIOA,GPIO_PIN_4);
@@ -1346,4 +1384,34 @@ bool driverSWLTC6804ReadVREFvoltage(float auxVoltageVREFArray[][driverSWLTC6804M
   }
 
 	return dataValid;
+}
+
+/* Mutes the LTC6813 discharge transistors */
+void LTC6813_mute(void)
+{
+	uint8_t cmd[4];
+	uint16_t cmd_pec;
+	cmd[0] = 0x00;
+	cmd[1] = 0x28;
+	cmd_pec = driverSWLTC6804CalcPEC15(2, cmd);
+	cmd[2] = (uint8_t)(cmd_pec >> 8);
+	cmd[3] = (uint8_t)(cmd_pec);
+
+	driverSWLTC6804WakeIC();
+	driverSWLTC6804Write(cmd,4);
+}
+
+/* Clears the LTC6813 Mute Discharge */
+void LTC6813_unmute(void)
+{
+	uint8_t cmd[4];
+	uint16_t cmd_pec;
+	cmd[0] = 0x00;
+	cmd[1] = 0x29;
+	cmd_pec = driverSWLTC6804CalcPEC15(2, cmd);
+	cmd[2] = (uint8_t)(cmd_pec >> 8);
+	cmd[3] = (uint8_t)(cmd_pec);
+
+	driverSWLTC6804WakeIC();
+	driverSWLTC6804Write(cmd,4);
 }

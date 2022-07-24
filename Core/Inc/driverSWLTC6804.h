@@ -297,6 +297,7 @@ void     driverSWLTC6804Init(driverLTC6804ConfigStructTypedef configStruct, uint
 void     driverSWLTC6804WriteConfigRegister(uint8_t totalNumberOfLTCs, uint32_t *balanceEnableMaskArray, bool useArray);
 void     driverSWLTC6804WriteConfigRegisterB(uint8_t totalNumberOfLTCs, uint32_t *balanceEnableMaskArray, bool useArray);
 int8_t   driverSWLTC6804ReadConfigRegister(uint8_t nIC, uint8_t r_config[][8]);
+int8_t   driverSWLTC6804ReadConfigRegisterB(uint8_t nIC, uint8_t r_config[][8]);
 
 //Balance resistor
 void     driverSWLTC6804EnableBalanceResistors(uint32_t enableMask, uint8_t cellMonitorType); // Used only for single slave  test with "testbms" command
@@ -335,6 +336,9 @@ void     driverSWLTC6804Write(uint8_t *writeBytes, uint8_t writeLength);
 void     driverSWLTC6804WriteRead(uint8_t *writeBytes, uint8_t writeLength, uint8_t *readBytes, uint8_t readLength);
 void     driverSWLTC6804WakeIC(void);
 uint16_t driverSWLTC6804CalcPEC15(uint8_t len, uint8_t *data);
+
+void LTC6813_unmute(void);
+void LTC6813_mute(void);
 
 
 

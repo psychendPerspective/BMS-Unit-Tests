@@ -167,7 +167,7 @@ auxMonitorTypeDef auxVoltagesIndividual[9];
 cell_asic BMS_IC[cellMonitorICCount];
 float packVoltage, cellVoltageHigh, cellVoltageLow, maxImbalanceVoltage;
 int32_t packCurrent, currentOffset;
-
+uint8_t rxConfig_A[1][8], rxConfig_B[1][8];
 
 /*******************************************************************************/
 int bufsize (char *buf)
@@ -849,6 +849,7 @@ void zeroCurrentCalibration(void)
 
 void init_LTC6813(void)
 {
+
 	driverLTC6804ConfigStructTypedef configStruct;
 	configStruct.GPIO1                    = true;																														// Do not pull down this pin (false = pull down)
 	configStruct.GPIO2                    = true;																														//
@@ -867,7 +868,7 @@ void init_LTC6813(void)
 	configStruct.CellUnderVoltageLimit    = 2.80f; // Undervoltage level, cell voltages under this limit will cause interrupt
 	configStruct.CellOverVoltageLimit     = 4.20f;
 
-	driverSWLTC6804Init(configStruct, NoOfCellMonitorsPossibleOnBMS, noOfTotalCells, noOfTempSensorPerModule,CELL_MON_LTC6811_1);
+	driverSWLTC6804Init(configStruct, NoOfCellMonitorsPossibleOnBMS, noOfTotalCells, noOfTempSensorPerModule,CELL_MON_LTC6813_1);
 
 	for( uint8_t modulePointer = 0; modulePointer < NoOfCellMonitorsPossibleOnBMS; modulePointer++)
 	{
@@ -887,6 +888,7 @@ void init_LTC6813(void)
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL);
 	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804ResetAuxRegisters();
+	//LTC6813_mute();
 	driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 	HAL_Delay(250);
 	zeroCurrentCalibration();
@@ -895,7 +897,19 @@ void init_LTC6813(void)
 	//driverSWLTC6804StartLoadedCellVoltageConversion(MD_FILTERED,DCP_ENABLED,CELL_CH_ALL,true);
 	//driverSWLTC6804ResetAuxRegisters();
 	//driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
-
+	driverSWLTC6804ReadConfigRegister(1,rxConfig_A);
+	sprintf(buffer, "Read ConfigRegisterA : %#x,%#x,%#x,%#x,%#x,%#x,%#x,%#x \r\n",
+			rxConfig_A[0][0],rxConfig_A[0][1],rxConfig_A[0][2],rxConfig_A[0][3],
+			rxConfig_A[0][4],rxConfig_A[0][5],rxConfig_A[0][6],rxConfig_A[0][7]);
+	send_uart(buffer);
+	clear_buffer();
+	HAL_Delay(100);
+	driverSWLTC6804ReadConfigRegisterB(1,rxConfig_B);
+	sprintf(buffer, "Read ConfigRegisterB : %#x,%#x,%#x,%#x,%#x,%#x,%#x,%#x \r\n",
+			rxConfig_B[0][0],rxConfig_B[0][1],rxConfig_B[0][2],rxConfig_B[0][3],
+			rxConfig_B[0][4],rxConfig_B[0][5],rxConfig_B[0][6],rxConfig_B[0][7]);
+	send_uart(buffer);
+	clear_buffer();
 }
 
 
@@ -908,6 +922,7 @@ void unit_test_LTC6813(void)
 	//HAL_Delay(300);
 	driverSWLTC6804ResetCellVoltageRegisters();
 	driverSWLTC6804ResetAuxRegisters();
+	LTC6813_mute();
 	driverSWLTC6804StartCellAndAuxVoltageConversion(MD_FILTERED, DCP_DISABLED);
 	HAL_Delay(250);
 	if(driverSWLTC6804ReadCellVoltagesArray(cellModuleVoltages))
@@ -951,6 +966,7 @@ void unit_test_LTC6813(void)
 				send_uart(buffer);
 				clear_buffer();
 	}
+
 
 	//driverSWLTC6804ResetCellVoltageRegisters();
 	//driverSWLTC6804StartCellVoltageConversion(MD_FILTERED,DCP_DISABLED,CELL_CH_ALL);
