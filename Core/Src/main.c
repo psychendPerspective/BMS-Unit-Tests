@@ -1096,6 +1096,13 @@ int main(void)
 
 	  }
 
+	  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4))
+	  {
+		  sprintf(buffer,"STAT input pin detected\n");
+		  send_uart(buffer);
+		  clear_buffer();
+	  }
+
 	  get_time();  //print RTC
 	  write_to_csvfile();
 	  HAL_Delay(250);
@@ -1426,6 +1433,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PB5 */
   GPIO_InitStruct.Pin = GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
